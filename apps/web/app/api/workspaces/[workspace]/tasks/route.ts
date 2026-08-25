@@ -5,6 +5,7 @@ import { one, type UserRow, writeAudit } from "@/lib/db";
 import { queueForSlug } from "@/lib/workspace-technocore";
 import { decryptIdentity } from "@/lib/secure-vault";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { runWorkspace } from "@/lib/office-runtime";
 import { IntegrityViolationError, assertWorkspaceIntegrityConfirmed, ensureWorkspaceIntegrity, integrityErrorResponse, trustTechnocoreRecord, verifiedRecords } from "@/lib/technocore-integrity";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +59,9 @@ export async function POST(request: Request, context: Context) {
     const owner = one<UserRow>("SELECT * FROM users WHERE id = ?", user.id);
     if (owner) await queue.signedEvent(await decryptIdentity(owner.account_private_key_enc), { type: "task_created", task_id: task.id }).catch(() => undefined);
     writeAudit({ userId: user.id, workspaceId: owned.id, action: "task.created", targetId: task.id, metadata: { title: task.title } });
+    void runWorkspace(owned).then((result) => {
+      if (result.action === "error" || result.action === "integrity_error") console.error("[runtime]", owned.slug, result);
+    }).catch((error: unknown) => console.error("[runtime]", owned.slug, error));
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
     return error instanceof IntegrityViolationError ? integrityErrorResponse(error) : authErrorResponse(error, "Unable to create task");
