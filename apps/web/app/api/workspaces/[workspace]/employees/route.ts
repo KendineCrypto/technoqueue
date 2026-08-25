@@ -34,9 +34,10 @@ export async function POST(request: Request, context: Context) {
     trustTechnocoreRecord(owned, profile.id, "agent", JSON.stringify(profile));
     const timestamp = nowIso();
     run("INSERT INTO hosted_agents(agent_id, workspace_id, owner_user_id, did, private_key_enc, connection_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", profile.id || randomUUID(), owned.id, user.id, identity.did, await encryptIdentity(identity), connectionId, timestamp, timestamp);
-    await ensureOwnedEventRoom(owned, true).catch(() => undefined);
+    await ensureOwnedEventRoom(owned, true).catch((error: unknown) => console.error("[employee-checkin]", workspace, "room sync failed", error));
     writeAudit({ userId: user.id, workspaceId: owned.id, action: "employee.hired", targetId: profile.id, metadata: { did: identity.did, provider: profile.provider, role: profile.role } });
-    try { await queueForSlug(workspace).signedEvent(identity, { type: "agent_online", role: profile.role, version: "1", label: profile.name }); } catch { /* profile is still usable; runtime will retry */ }
+    try { await queueForSlug(workspace).signedEvent(identity, { type: "agent_online", role: profile.role, version: "1", label: profile.name }); }
+    catch (error) { console.error("[employee-checkin]", workspace, profile.id, error); /* profile is usable; runtime and board wake-up will retry */ }
     return NextResponse.json({ agent: { ...profile, sessionOwned: true, configured: true } }, { status: 201 });
   } catch (error) {
     return authErrorResponse(error, "Unable to hire employee");

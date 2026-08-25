@@ -4,7 +4,7 @@ import type { AgentEvent, AgentProfile, ParsedEvent, ProviderKind, Task, TaskInt
 import { Activity, Bot, KeyRound, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, UserMinus, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type TaskView = Task & { integrity: TaskIntegrity };
 type ProviderConnection = { id: string; provider: ProviderKind; label: string; maskedKey: string; createdAt: string };
@@ -88,6 +88,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
   const [hireOpen, setHireOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<OfficeAgent>();
   const [workerAtlas, setWorkerAtlas] = useState<{ url: string; cutout: boolean }>();
+  const lastRuntimeWake = useRef(0);
 
   const refresh = useCallback(async () => {
     const endpoints = ["tasks", "events", "office"].map((name) => fetch(`/api/workspaces/${encodeURIComponent(workspace)}/${name}`, { cache: "no-store" }));
@@ -133,6 +134,16 @@ export function LiveBoard({ workspace }: { workspace: string }) {
   }, [refresh, workspace]);
 
   useEffect(() => { void refresh(); const interval = window.setInterval(() => void refresh(), 6000); return () => window.clearInterval(interval); }, [refresh]);
+  useEffect(() => {
+    if (!canManage) return;
+    const hasPendingWork = tasks.some((task) => task.status === "open" || task.status === "running" || task.status === "review");
+    const hasEmployeeWithoutPresence = officeAgents.some((employee) => !employee.paused && !agents.some((agent) => agent.did === employee.did && agent.state === "active"));
+    if (!hasPendingWork && !hasEmployeeWithoutPresence) return;
+    const now = Date.now();
+    if (now - lastRuntimeWake.current < 15_000) return;
+    lastRuntimeWake.current = now;
+    void fetch(`/api/workspaces/${encodeURIComponent(workspace)}/runtime`, { method: "POST" }).catch(() => undefined);
+  }, [agents, canManage, officeAgents, tasks, workspace]);
   useEffect(() => { let active = true; void buildTransparentWorkerAtlas().then((url) => { if (active) setWorkerAtlas({ url, cutout: true }); }).catch(() => { if (active) setWorkerAtlas({ url: "/game/office-workers.png", cutout: false }); }); return () => { active = false; }; }, []);
   const floorCount = Math.max(1, Math.ceil(agents.length / agentsPerFloor));
   useEffect(() => { setFloor((current) => Math.min(current, floorCount - 1)); }, [floorCount]);
