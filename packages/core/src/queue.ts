@@ -10,6 +10,7 @@ import { resourcesForWorkspace } from "./validation";
 import { claimForReview, claimForWork, submitResult, approveTask, requestChanges, claimOfficeStep, completeOfficeWork, finishOfficeReview } from "./transitions";
 
 export type StoredTask = { task: Task; raw: string };
+type PersistedTaskHook = (task: Task) => void | Promise<void>;
 
 export class TechnoQueue {
   readonly resources;
@@ -89,31 +90,34 @@ export class TechnoQueue {
     return { task: won, reclaimed };
   }
 
-  async claimOffice(stored: StoredTask, identity: AgentIdentity, leaseSeconds: number): Promise<Task | null> {
+  async claimOffice(stored: StoredTask, identity: AgentIdentity, leaseSeconds: number, onPersisted?: PersistedTaskHook): Promise<Task | null> {
     if (!stored.task.office) throw new Error("Task has no office workflow");
     const stepIndex = stored.task.office.current_step;
     const next = claimOfficeStep(stored.task, identity.did, leaseSeconds);
     const won = await this.cas(stored, next);
     if (!won) return null;
-    await this.signedEvent(identity, { type: "office_step_started", task_id: won.id, step: stepIndex, agent_id: won.office!.steps[stepIndex]!.agent_id });
+    await onPersisted?.(won);
+    await this.signedEvent(identity, { type: "office_step_started", task_id: won.id, step: stepIndex, agent_id: won.office!.steps[stepIndex]!.agent_id }).catch(() => undefined);
     return won;
   }
 
-  async completeOffice(stored: StoredTask, identity: AgentIdentity, result: string): Promise<Task | null> {
+  async completeOffice(stored: StoredTask, identity: AgentIdentity, result: string, onPersisted?: PersistedTaskHook): Promise<Task | null> {
     const stepIndex = stored.task.office?.current_step;
     if (stepIndex === undefined) throw new Error("Task has no office workflow");
     const next = completeOfficeWork(stored.task, identity.did, result);
     const won = await this.cas(stored, next);
     const hash = won?.office?.steps[stepIndex]?.output_sha256;
-    if (won && hash) await this.signedEvent(identity, { type: "office_step_completed", task_id: won.id, step: stepIndex, agent_id: won.office!.steps[stepIndex]!.agent_id, result_sha256: hash });
+    if (won) await onPersisted?.(won);
+    if (won && hash) await this.signedEvent(identity, { type: "office_step_completed", task_id: won.id, step: stepIndex, agent_id: won.office!.steps[stepIndex]!.agent_id, result_sha256: hash }).catch(() => undefined);
     return won;
   }
 
-  async finishOfficeReview(stored: StoredTask, identity: AgentIdentity, decision: { approved: true } | { approved: false; feedback: string }): Promise<Task | null> {
+  async finishOfficeReview(stored: StoredTask, identity: AgentIdentity, decision: { approved: true } | { approved: false; feedback: string }, onPersisted?: PersistedTaskHook): Promise<Task | null> {
     const next = finishOfficeReview(stored.task, identity.did, decision);
     const won = await this.cas(stored, next);
+    if (won) await onPersisted?.(won);
     if (!won || !won.result_sha256) return won;
-    await this.signedEvent(identity, decision.approved ? { type: "task_approved", task_id: won.id, result_sha256: won.result_sha256 } : { type: "task_changes_requested", task_id: won.id, result_sha256: won.result_sha256, feedback: decision.feedback.slice(0, 1000) });
+    await this.signedEvent(identity, decision.approved ? { type: "task_approved", task_id: won.id, result_sha256: won.result_sha256 } : { type: "task_changes_requested", task_id: won.id, result_sha256: won.result_sha256, feedback: decision.feedback.slice(0, 1000) }).catch(() => undefined);
     return won;
   }
 

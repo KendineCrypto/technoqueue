@@ -39,9 +39,9 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
   try {
     const rows = all<HostedAgentRow>("SELECT * FROM hosted_agents WHERE workspace_id = ? AND archived_at IS NULL ORDER BY created_at", workspace.id);
     if (!rows.length) return { action: "idle", reason: "No hosted employees" };
+    await ensureOwnedEventRoom(workspace, true);
     try { await assertWorkspaceIntegrityConfirmed(workspace); }
     catch (error) { if (error instanceof IntegrityViolationError) return { action: "integrity_confirmation_required", error: error.message }; throw error; }
-    if (!workspace.room_owned_at) await ensureOwnedEventRoom(workspace);
     const queue = new TechnoQueue(workspace.slug, undefined, workspace.event_room);
     let storedTasks: Array<{ raw: string; task: Task }>; let profiles: Array<{ raw: string; value: AgentProfile }>;
     try {
@@ -73,13 +73,17 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
       const stepIndex = stored.task.office!.current_step;
       const step = stored.task.office!.steps[stepIndex]!;
       const resumeFailedClaim = Boolean(row.last_error) && (step.kind === "review" ? stored.task.reviewer_did === hosted.identity.did : stored.task.worker_did === hosted.identity.did);
-      const claimed = resumeFailedClaim ? stored.task : await queue.claimOffice(stored, hosted.identity, Number(process.env.TECHNOQUEUE_LEASE_SECONDS ?? 120));
+      const claimed = resumeFailedClaim ? stored.task : await queue.claimOffice(
+        stored,
+        hosted.identity,
+        Number(process.env.TECHNOQUEUE_LEASE_SECONDS ?? 120),
+        (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted))
+      );
       if (!claimed) {
         try { await verifiedRecord(workspace, stored.task.id, "task", queue.client); }
         catch (error) { if (error instanceof IntegrityViolationError) return { action: "integrity_error", taskId: stored.task.id, agentId: row.agent_id, error: error.message }; throw error; }
         continue;
       }
-      if (!resumeFailedClaim) trustTechnocoreRecord(workspace, claimed.id, "task", serializeTask(claimed));
       updateHostedAgent(row.agent_id, { runningTaskId: claimed.id, lastError: null, retryAfter: null });
       try {
         const executor = new HostedProviderExecutor(connection.provider, profile.model, connection.apiKey);
@@ -88,15 +92,23 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
           const approved = /^APPROVE\b/i.test(response);
           const feedback = response.replace(/^(APPROVE|REQUEST_CHANGES)\s*:?[-\s]*/i, "").slice(0, 500) || "The result needs revision.";
           const latest = await verifiedRecord(workspace, claimed.id, "task", queue.client);
-          const completed = await queue.finishOfficeReview({ raw: latest.raw, task: latest.value }, hosted.identity, approved ? { approved: true } : { approved: false, feedback });
-          if (completed) trustTechnocoreRecord(workspace, completed.id, "task", serializeTask(completed));
+          await queue.finishOfficeReview(
+            { raw: latest.raw, task: latest.value },
+            hosted.identity,
+            approved ? { approved: true } : { approved: false, feedback },
+            (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted))
+          );
           writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: approved ? "task.approved" : "task.returned", targetId: claimed.id, metadata: { agentId: row.agent_id, step: stepIndex } });
           return { action: approved ? "approved" : "returned", taskId: claimed.id, agentId: row.agent_id, step: stepIndex };
         }
         const result = await executor.generate({ system: systemPrompt(profile), prompt: workPrompt(claimed) });
         const latest = await verifiedRecord(workspace, claimed.id, "task", queue.client);
-        const completed = await queue.completeOffice({ raw: latest.raw, task: latest.value }, hosted.identity, result);
-        if (completed) trustTechnocoreRecord(workspace, completed.id, "task", serializeTask(completed));
+        await queue.completeOffice(
+          { raw: latest.raw, task: latest.value },
+          hosted.identity,
+          result,
+          (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted))
+        );
         writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: "task.step_completed", targetId: claimed.id, metadata: { agentId: row.agent_id, step: stepIndex } });
         return { action: "completed_step", taskId: claimed.id, agentId: row.agent_id, step: stepIndex };
       } catch (error) {

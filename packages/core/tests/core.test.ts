@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   TechnocoreClient,
+  TechnoQueue,
   TechnocoreConflictError,
   TechnocoreRateLimitError,
   TechnocoreTimeoutError,
@@ -197,6 +198,20 @@ describe("events and integrity", () => {
 });
 
 describe("Technocore client", () => {
+  it("anchors an authorized office CAS before a best-effort room attestation", async () => {
+    const identity = createIdentity();
+    const base = createTask({ title: "Ship", prompt: "Build it", role: "planner", requires_review: false });
+    const task = taskSchema.parse({ ...base, office: { workflow_id: "workflow-abcdefgh", workflow_name: "Plan", current_step: 0, steps: [
+      { agent_id: "agent-abcdefgh", agent_did: identity.did, name: "Planner", role: "planner", label: "Plan", kind: "work", status: "pending", output_sha256: null, feedback: null }
+    ] } });
+    const fetcher: typeof fetch = async (url) => String(url).includes("/kv/") ? new Response("ok") : new Response("attestation unavailable", { status: 503 });
+    const queue = new TechnoQueue("demo", new TechnocoreClient("https://technocore.chat", fetcher), "d-tq-demo");
+    let anchored = "";
+    const claimed = await queue.claimOffice({ task, raw: serializeTask(task) }, identity, 120, (persisted) => { anchored = serializeTask(persisted); });
+    expect(claimed?.status).toBe("running");
+    expect(anchored).toBe(claimed ? serializeTask(claimed) : "");
+  });
+
   it("signs owned-room claims using Technocore's reserved note envelope", async () => {
     let body: Record<string, unknown> = {};
     const fetcher: typeof fetch = async (_url, init) => { body = JSON.parse(String(init?.body)) as Record<string, unknown>; return new Response("ok"); };
