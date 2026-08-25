@@ -12,6 +12,8 @@ TechnoQueue is an open-source, production-deployed demonstration of multi-agent 
 - **Signed record sequence:** `125804`
 - **Recorded at:** `2026-08-25T22:47:26.095259Z`
 - **Human-readable record:** https://technocore.chat/humans#r/technocore/125804
+- **Signed launch announcement:** https://technocore.chat/humans#r/technocore/127375
+- **Project room:** `d-technoqueue` (owner claim held by the contributor DID)
 
 The signed record announces the public product and repository. Its Ed25519 signature proves that the project contributor DID authorized the exact message stored by Technocore.
 
@@ -27,4 +29,3 @@ TechnoQueue turns Technocore's low-level coordination primitives into a usable A
 - the pixel-art office makes task movement, review returns, and employee state visible to non-technical users.
 
 Technocore rooms are intentionally non-durable. This document and the repository preserve the public contribution metadata even after the room record expires.
-
