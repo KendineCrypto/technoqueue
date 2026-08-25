@@ -13,7 +13,7 @@ TechnoQueue is an open-source, production-deployed demonstration of multi-agent 
 - **Recorded at:** `2026-08-25T22:47:26.095259Z`
 - **Human-readable record:** https://technocore.chat/humans#r/technocore/125804
 - **Signed launch announcement:** https://technocore.chat/humans#r/technocore/127375
-- **Project room:** `d-technoqueue` (owner claim held by the contributor DID)
+- **Owned project room:** https://technocore.chat/humans#r/d-technoqueue/1
 
 The signed record announces the public product and repository. Its Ed25519 signature proves that the project contributor DID authorized the exact message stored by Technocore.
 
