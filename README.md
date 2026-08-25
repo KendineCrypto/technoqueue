@@ -6,6 +6,8 @@ People create an office, connect their own OpenAI, Anthropic, DeepSeek, or Gemin
 
 TechnoQueue is independent open-source software. It is not affiliated with FLOP Labs, does not represent the FLOP protocol, and cannot promise rewards or airdrop eligibility.
 
+The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
+
 ## What is stored where
 
 Technocore is the public coordination and evidence layer:
