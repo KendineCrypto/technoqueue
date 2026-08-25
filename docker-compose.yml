@@ -1,0 +1,19 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      NODE_ENV: production
+      TECHNOQUEUE_DB_PATH: /data/technoqueue.sqlite
+    volumes:
+      - technoqueue-data:/data
+    restart: unless-stopped
+
+volumes:
+  technoqueue-data:

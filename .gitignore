@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+.next/
+dist/
+coverage/
+.env
+.env.local
+.env.*.local
+.secrets/
+.data/
+*.pem
+*.key
+*.log
+*.sqlite*
+*.tsbuildinfo
+.DS_Store
+pnpm-debug.log*

@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+
+overrides:
+  sharp: 0.35.3
+  postcss: 8.5.26
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

@@ -1,0 +1,232 @@
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+
+export type UserRow = {
+  id: string;
+  username: string;
+  password_hash: string;
+  account_did: string;
+  account_private_key_enc: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkspaceRow = {
+  id: string;
+  owner_user_id: string;
+  slug: string;
+  name: string;
+  event_room: string;
+  room_owned_at: string | null;
+  integrity_initialized_at: string | null;
+  integrity_confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrustedTechnocoreRecordRow = {
+  workspace_id: string;
+  record_key: string;
+  kind: "agent" | "workflow" | "task";
+  raw_value: string;
+  auth_tag: string;
+  compromised_at: string | null;
+  observed_sha256: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProviderRow = {
+  id: string;
+  user_id: string;
+  provider: string;
+  label: string;
+  last_four: string;
+  api_key_enc: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type HostedAgentRow = {
+  agent_id: string;
+  workspace_id: string;
+  owner_user_id: string;
+  did: string;
+  private_key_enc: string;
+  connection_id: string;
+  last_online_at: number | null;
+  running_task_id: string | null;
+  last_error: string | null;
+  retry_after: number | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+declare global {
+  var __technoQueueDb: DatabaseSync | undefined;
+  var __technoQueueDbSchemaVersion: number | undefined;
+}
+
+function databasePath() {
+  return resolve(process.env.TECHNOQUEUE_DB_PATH ?? resolve(process.cwd(), ".data", "technoqueue.sqlite"));
+}
+
+function openDatabase() {
+  const path = databasePath();
+  mkdirSync(dirname(path), { recursive: true });
+  const database = new DatabaseSync(path);
+  database.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      account_did TEXT NOT NULL UNIQUE,
+      account_private_key_enc TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      name TEXT NOT NULL,
+      event_room TEXT NOT NULL,
+      room_owned_at TEXT,
+      integrity_initialized_at TEXT,
+      integrity_confirmed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS workspaces_owner ON workspaces(owner_user_id);
+    CREATE TABLE IF NOT EXISTS provider_connections (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL,
+      last_four TEXT NOT NULL,
+      api_key_enc TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS providers_user ON provider_connections(user_id);
+    CREATE TABLE IF NOT EXISTS hosted_agents (
+      agent_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      did TEXT NOT NULL UNIQUE,
+      private_key_enc TEXT NOT NULL,
+      connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE RESTRICT,
+      last_online_at INTEGER,
+      running_task_id TEXT,
+      last_error TEXT,
+      retry_after INTEGER,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS agents_workspace ON hosted_agents(workspace_id, archived_at);
+    CREATE TABLE IF NOT EXISTS trusted_technocore_records (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      record_key TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('agent', 'workflow', 'task')),
+      raw_value TEXT NOT NULL,
+      auth_tag TEXT NOT NULL,
+      compromised_at TEXT,
+      observed_sha256 TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, record_key)
+    );
+    CREATE INDEX IF NOT EXISTS trusted_records_kind ON trusted_technocore_records(workspace_id, kind);
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      target_id TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS audit_workspace ON audit_log(workspace_id, created_at DESC);
+    INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, datetime('now'));
+  `);
+  return database;
+}
+
+function migrate(database: DatabaseSync) {
+  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 4) return;
+  try { database.exec("ALTER TABLE workspaces ADD COLUMN event_room TEXT"); } catch { /* migrated already */ }
+  try { database.exec("ALTER TABLE workspaces ADD COLUMN room_owned_at TEXT"); } catch { /* migrated already */ }
+  database.exec("UPDATE workspaces SET event_room = 'd-tq-' || slug WHERE event_room IS NULL OR event_room = ''");
+  database.exec("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, datetime('now'))");
+  try { database.exec("ALTER TABLE workspaces ADD COLUMN integrity_initialized_at TEXT"); } catch { /* migrated already */ }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS trusted_technocore_records (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      record_key TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('agent', 'workflow', 'task')),
+      raw_value TEXT NOT NULL,
+      auth_tag TEXT NOT NULL,
+      compromised_at TEXT,
+      observed_sha256 TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, record_key)
+    );
+    CREATE INDEX IF NOT EXISTS trusted_records_kind ON trusted_technocore_records(workspace_id, kind);
+    INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, datetime('now'));
+  `);
+  try { database.exec("ALTER TABLE workspaces ADD COLUMN integrity_confirmed_at TEXT"); } catch { /* migrated already */ }
+  database.exec("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, datetime('now'))");
+  globalThis.__technoQueueDbSchemaVersion = 4;
+}
+
+export function db() {
+  globalThis.__technoQueueDb ??= openDatabase();
+  migrate(globalThis.__technoQueueDb);
+  return globalThis.__technoQueueDb;
+}
+
+export function one<T>(sql: string, ...values: SQLInputValue[]): T | undefined {
+  return db().prepare(sql).get(...values) as T | undefined;
+}
+
+export function all<T>(sql: string, ...values: SQLInputValue[]): T[] {
+  return db().prepare(sql).all(...values) as T[];
+}
+
+export function run(sql: string, ...values: SQLInputValue[]) {
+  return db().prepare(sql).run(...values);
+}
+
+export function nowIso() {
+  return new Date().toISOString();
+}
+
+export function writeAudit(input: { userId?: string; workspaceId?: string; action: string; targetId?: string; metadata?: unknown }) {
+  run(
+    "INSERT INTO audit_log(user_id, workspace_id, action, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    input.userId ?? null,
+    input.workspaceId ?? null,
+    input.action,
+    input.targetId ?? null,
+    JSON.stringify(input.metadata ?? {}),
+    nowIso()
+  );
+}

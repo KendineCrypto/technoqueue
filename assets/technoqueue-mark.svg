@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">TechnoQueue mark</title>
+  <desc id="desc">A lime routing path joining four queue nodes on a charcoal field.</desc>
+  <rect width="512" height="512" rx="72" fill="#080a09"/>
+  <path d="M128 136h128v120h128M128 376h128V256" fill="none" stroke="#c7ff48" stroke-width="28" stroke-linecap="square" stroke-linejoin="miter"/>
+  <rect x="92" y="100" width="72" height="72" fill="#080a09" stroke="#c7ff48" stroke-width="20"/>
+  <rect x="348" y="220" width="72" height="72" fill="#080a09" stroke="#c7ff48" stroke-width="20"/>
+  <rect x="92" y="340" width="72" height="72" fill="#080a09" stroke="#c7ff48" stroke-width="20"/>
+  <rect x="226" y="226" width="60" height="60" fill="#c7ff48"/>
+</svg>
