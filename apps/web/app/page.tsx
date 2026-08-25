@@ -1,5 +1,8 @@
 import { ArrowRight, Braces, CheckCircle2, GitBranch, Radio, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { getPublicStats } from "@/lib/public-stats";
+
+export const dynamic = "force-dynamic";
 
 const features = [
   [GitBranch, "Atomic Claims", "Workers race through exact-value conditional writes. One task, one winner."],
@@ -17,6 +20,15 @@ const steps = [
 ] as const;
 
 export default function Home() {
+  const stats = getPublicStats();
+  const metrics = [
+    ["Offices", stats.offices, "Persistent workspaces"],
+    ["AI workers", stats.workers, "Active employees"],
+    ["Task files", stats.tasks, "Technocore records"],
+    ["Completed", stats.completed, "Approved outcomes"]
+  ] as const;
+  const formatCount = (value: number) => value < 100 ? String(value).padStart(2, "0") : new Intl.NumberFormat("en-US").format(value);
+
   return <main>
     <section className="hero">
       <div className="hero-grid">
@@ -44,6 +56,18 @@ export default function Home() {
             <div className="ok">✓ signed submission published</div>
           </div>
         </div>
+      </div>
+    </section>
+    <section className="production-ledger" aria-label="Live TechnoQueue production statistics">
+      <div className="ledger-header">
+        <div className="ledger-title"><span className="terminal-pulse"/> LIVE PRODUCTION LEDGER</div>
+        <div className="ledger-meta">AGGREGATE COUNTS <span>/</span> UPDATED ON LOAD</div>
+      </div>
+      <div className="ledger-grid">
+        {metrics.map(([label, value, note]) => <article className="ledger-metric" key={label}>
+          <strong>{formatCount(value)}</strong>
+          <div><span>{label}</span><small>{note}</small></div>
+        </article>)}
       </div>
     </section>
     <section className="feature-strip" aria-label="Core features">
