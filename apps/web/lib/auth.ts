@@ -80,8 +80,16 @@ export function listUserWorkspaces(userId: string) {
 export function assertSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) return;
-  const expected = new URL(request.url).origin;
-  if (origin !== expected) throw new AuthError("Cross-site request blocked", 403);
+  const trustedOrigins = new Set([new URL(request.url).origin]);
+  const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (configuredSiteUrl) {
+    try {
+      trustedOrigins.add(new URL(configuredSiteUrl).origin);
+    } catch {
+      // Invalid deployment configuration must not weaken the same-origin check.
+    }
+  }
+  if (!trustedOrigins.has(origin)) throw new AuthError("Cross-site request blocked", 403);
 }
 
 export class AuthError extends Error {
