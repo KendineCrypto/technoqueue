@@ -101,7 +101,7 @@ The Compose file mounts `/data` for SQLite. Back up the database and master key 
    TECHNOQUEUE_BACKGROUND_RUNTIME=true
    ```
 
-4. Set the healthcheck path to `/api/health`, generate a temporary Railway domain, and verify the deployment before attaching the custom domain.
+4. Set the Railway healthcheck path to `/api/live`, generate a temporary Railway domain, and verify the deployment before attaching the custom domain. Use `/api/health` separately to inspect database and vault readiness.
 5. Add `technoqueue.fun` under Railway **Networking > Custom Domain**. Railway requires both the displayed routing `CNAME` and ownership `TXT` records.
 6. Because Unstoppable's DNS does not provide an apex `ALIAS`/CNAME-flattening record, add the domain to Cloudflare's free DNS plan, replace the nameservers at Unstoppable with the two Cloudflare nameservers, and add Railway's root `CNAME` and `TXT` records in Cloudflare. Railway then provisions HTTPS automatically.
 
