@@ -129,6 +129,8 @@ Employees have separate DIDs and separate `.tqid` exports. A signature proves po
 | `TECHNOQUEUE_BACKGROUND_RUNTIME` | Enable persistent office scheduler | `true` |
 | `TECHNOQUEUE_RUNTIME_INTERVAL_MS` | Scheduler interval | `5000` |
 | `TECHNOQUEUE_LEASE_SECONDS` | Technocore claim lease | `120` |
+| `TECHNOQUEUE_PUBLIC_FEED` | Publish sanitized, high-signal production events to the project room | canonical deployment only |
+| `TECHNOQUEUE_PUBLIC_FEED_ROOM` | Owned Technocore room used by the public relay | `d-technoqueue` |
 | `TECHNOQUEUE_MAX_WORKSPACES_PER_USER` | Account office quota | `10` |
 | `TECHNOQUEUE_MAX_PROVIDERS_PER_USER` | Account provider quota | `12` |
 | `TECHNOQUEUE_MAX_AGENTS_PER_WORKSPACE` | Office employee quota | `24` |

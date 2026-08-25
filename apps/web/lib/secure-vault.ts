@@ -80,6 +80,14 @@ export function importIdentityPrivateKey(pem: string): AgentIdentity {
   return { privateKey, publicKey, did: didFromPublicKey(publicKey) };
 }
 
+export function publicFeedIdentity(): AgentIdentity {
+  const seed = createHmac("sha256", masterKey()).update("technoqueue-service-identity-v1\0public-feed").digest();
+  const pkcs8Prefix = Buffer.from("302e020100300506032b657004220420", "hex");
+  const privateKey = createPrivateKey({ key: Buffer.concat([pkcs8Prefix, seed]), type: "pkcs8", format: "der" });
+  const publicKey = createPublicKey(privateKey);
+  return { privateKey, publicKey, did: didFromPublicKey(publicKey) };
+}
+
 export async function encryptIdentity(identity: AgentIdentity) {
   return encryptSecret(exportIdentityPrivateKey(identity));
 }

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { PUBLIC_FEED_ACTIONS, publicFeedEnabled } from "./public-feed-policy";
 
 export type UserRow = {
   id: string;
@@ -164,13 +165,24 @@ function openDatabase() {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS audit_workspace ON audit_log(workspace_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS public_feed_outbox (
+      audit_id INTEGER PRIMARY KEY REFERENCES audit_log(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      published_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS public_feed_pending ON public_feed_outbox(status, next_attempt_at, audit_id);
     INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, datetime('now'));
   `);
   return database;
 }
 
 function migrate(database: DatabaseSync) {
-  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 4) return;
+  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 5) return;
   try { database.exec("ALTER TABLE workspaces ADD COLUMN event_room TEXT"); } catch { /* migrated already */ }
   try { database.exec("ALTER TABLE workspaces ADD COLUMN room_owned_at TEXT"); } catch { /* migrated already */ }
   database.exec("UPDATE workspaces SET event_room = 'd-tq-' || slug WHERE event_room IS NULL OR event_room = ''");
@@ -194,7 +206,21 @@ function migrate(database: DatabaseSync) {
   `);
   try { database.exec("ALTER TABLE workspaces ADD COLUMN integrity_confirmed_at TEXT"); } catch { /* migrated already */ }
   database.exec("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, datetime('now'))");
-  globalThis.__technoQueueDbSchemaVersion = 4;
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS public_feed_outbox (
+      audit_id INTEGER PRIMARY KEY REFERENCES audit_log(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      published_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS public_feed_pending ON public_feed_outbox(status, next_attempt_at, audit_id);
+    INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (5, datetime('now'));
+  `);
+  globalThis.__technoQueueDbSchemaVersion = 5;
 }
 
 export function db() {
@@ -220,13 +246,22 @@ export function nowIso() {
 }
 
 export function writeAudit(input: { userId?: string; workspaceId?: string; action: string; targetId?: string; metadata?: unknown }) {
-  run(
+  const createdAt = nowIso();
+  const result = run(
     "INSERT INTO audit_log(user_id, workspace_id, action, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     input.userId ?? null,
     input.workspaceId ?? null,
     input.action,
     input.targetId ?? null,
     JSON.stringify(input.metadata ?? {}),
-    nowIso()
+    createdAt
   );
+  if (publicFeedEnabled() && PUBLIC_FEED_ACTIONS.has(input.action)) {
+    run(
+      "INSERT OR IGNORE INTO public_feed_outbox(audit_id, created_at, updated_at) VALUES (?, ?, ?)",
+      Number(result.lastInsertRowid),
+      createdAt,
+      createdAt
+    );
+  }
 }
