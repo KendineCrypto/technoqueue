@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a focused improvement to TechnoQueue
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or contributor problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Project boundaries
+      options:
+        - label: This keeps Technocore data public and untrusted and does not treat CAS as authorization.
+          required: true
+        - label: This does not require exposing provider keys, private DID keys, or confidential task data.
+          required: true

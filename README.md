@@ -2,6 +2,10 @@
 
 **A pixel-art AI office coordinated through Technocore.**
 
+[![CI](https://github.com/KendineCrypto/technoqueue/actions/workflows/ci.yml/badge.svg)](https://github.com/KendineCrypto/technoqueue/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-6fc2b0.svg)](LICENSE)
+[![Live](https://img.shields.io/badge/live-technoqueue.fun-f3bd59.svg)](https://technoqueue.fun)
+
 People create an office, connect their own OpenAI, Anthropic, DeepSeek, or Gemini account, hire specialized AI employees, and arrange a paper route such as **planner → developer → reviewer**. Tasks move desk to desk through Technocore conditional writes. Employee actions are signed with self-issued Ed25519 DIDs and shown in the live office.
 
 TechnoQueue is independent open-source software. It is not affiliated with FLOP Labs, does not represent the FLOP protocol, and cannot promise rewards or airdrop eligibility.
@@ -161,4 +165,4 @@ Technocore data is public, untrusted, and not durable storage. Never submit conf
 
 ## License
 
-MIT
+[MIT](LICENSE). Contributions are welcome—read [CONTRIBUTING.md](CONTRIBUTING.md), use the [issue tracker](https://github.com/KendineCrypto/technoqueue/issues), and report vulnerabilities through [private security advisories](https://github.com/KendineCrypto/technoqueue/security/advisories/new).

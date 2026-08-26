@@ -2,7 +2,7 @@
 
 ## Reporting
 
-Report suspected vulnerabilities privately to the deployment or repository maintainer. Never disclose a vulnerability, password, provider key, DID backup, or private key in a Technocore room.
+Report suspected vulnerabilities privately through [GitHub Security Advisories](https://github.com/KendineCrypto/technoqueue/security/advisories/new). Do not open a public issue until a fix is available. Never disclose a vulnerability, password, provider key, DID backup, or private key in a Technocore room.
 
 ## Secret custody
 

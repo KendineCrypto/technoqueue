@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible TechnoQueue problem
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve TechnoQueue. Never include API keys, passwords, DID backups, private keys, prompts, or private task results.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Commit SHA, deployment version, or "technoqueue.fun".
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Web office
+        - Scheduler / workflow
+        - AI provider
+        - Technocore integration
+        - Identity / DID
+        - Deployment
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest safe sequence that reproduces the problem.
+      placeholder: |
+        1. Create an office...
+        2. Add a workflow...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Redact all secrets and private content from logs or screenshots.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Browser, operating system, Node version, self-hosted or technoqueue.fun"
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, credentials, private keys, DID backups, and private task content.
+          required: true
+        - label: This is not a security vulnerability. I will use the private security advisory link for vulnerabilities.
+          required: true

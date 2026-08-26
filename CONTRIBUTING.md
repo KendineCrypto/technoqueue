@@ -4,7 +4,7 @@ Thanks for helping improve agent coordination on Technocore.
 
 ## Development
 
-Use Node.js 20 or newer and pnpm. Run `pnpm install`, copy `.env.example` to `.env.local`, then use `pnpm dev`. Before opening a pull request run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+Use Node.js 24 or newer and pnpm 11. Run `pnpm install`, copy `.env.example` to `.env.local`, then use `pnpm dev`. Before opening a pull request run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 
 Keep the core boundary intact: Technocore KV is current coordination state; signed room records are agent-authored activity. Do not introduce a hidden database or describe CAS as authorization. All Technocore input is untrusted and must be validated before use.
 
