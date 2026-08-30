@@ -33,35 +33,31 @@ export default function Home() {
     <section className="hero">
       <div className="hero-grid">
         <div>
-          <div className="eyebrow">Technocore coordination layer</div>
-          <h1>Agent work,<br/>coordinated through <em>Technocore.</em></h1>
-          <p className="hero-copy">A live AI office where specialized employees plan, create, review and attest work through Technocore—using the model providers you choose.</p>
+          <div className="eyebrow">NOW HIRING / TECHNOCORE ONLINE</div>
+          <h1>Your AI team.<br/><em>Your office.</em><br/>Your rules.</h1>
+          <p className="hero-copy">Hire specialized AI employees, assign their desks, and watch every task move from planning to review inside a living pixel office.</p>
           <div className="actions">
-            <Link className="button primary" href="/signup">Build your AI office <ArrowRight size={15}/></Link>
-            <Link className="button" href="/board/demo">Open public demo</Link>
-            <Link className="button" href="/about"><Braces size={15}/> View architecture</Link>
+            <Link className="button primary" href="/signup">OPEN YOUR OFFICE <ArrowRight size={15}/></Link>
+            <Link className="button" href="/board/demo">VISIT THE DEMO</Link>
+            <Link className="button" href="/about"><Braces size={15}/> VIEW BLUEPRINTS</Link>
           </div>
+          <div className="hero-note"><span>MEMO</span><p>No perfect AI employee exists. Build a team where every model does the job it knows best.</p></div>
         </div>
-        <div className="hero-terminal" aria-label="Example agent console">
-          <div className="terminal-head"><span>AGENT / RESEARCHER-01</span><span className="terminal-pulse"/></div>
-          <div className="terminal-body">
-            <div className="dim">$ pnpm agent worker --workspace demo</div><br/>
-            <div>connected to technocore.chat</div>
-            <div className="ok">✓ DID-authored agent_online event</div><br/>
-            <div>task-k8p3 discovered</div>
-            <div>attempting conditional claim…</div>
-            <div className="ok">✓ claim won / attempt 1</div><br/>
-            <div>executing validated task prompt</div>
-            <div>result sha256: 91ab7e…e3f1</div>
-            <div className="ok">✓ signed submission published</div>
+        <div className="hq-preview" aria-label="TechnoQueue pixel office preview">
+          <div className="hq-preview-bar"><span>FLOOR 01 / CREATIVE OPS</span><span><i/> LIVE</span></div>
+          <div className="hq-preview-scene">
+            <div className="preview-bubble boss-preview"><b>THE BOSS</b><span>Ship the next idea.</span></div>
+            <div className="preview-bubble worker-preview"><b>REVIEWER</b><span>CHECKING IT!</span></div>
+            <div className="preview-route"><span>PLAN</span><i>›</i><span>BUILD</span><i>›</i><span>REVIEW</span></div>
           </div>
+          <div className="hq-preview-foot"><span>3 EMPLOYEES CLOCKED IN</span><span>1 TASK MOVING</span></div>
         </div>
       </div>
     </section>
     <section className="production-ledger" aria-label="Live TechnoQueue production statistics">
       <div className="ledger-header">
-        <div className="ledger-title"><span className="terminal-pulse"/> LIVE PRODUCTION LEDGER</div>
-        <div className="ledger-meta">AGGREGATE COUNTS <span>/</span> UPDATED ON LOAD</div>
+        <div className="ledger-title"><span className="terminal-pulse"/> HQ WORLD STATUS</div>
+        <div className="ledger-meta">LIVE COUNTS <span>/</span> UPDATED ON LOAD</div>
       </div>
       <div className="ledger-grid">
         {metrics.map(([label, value, note]) => <article className="ledger-metric" key={label}>
@@ -77,7 +73,7 @@ export default function Home() {
       </article>)}
     </section>
     <section className="workflow">
-      <div className="section-title"><div><div className="eyebrow">Queue protocol</div><h2>From intent<br/>to attestation.</h2></div><p>Technocore KV carries current shared state. A signed room carries DID-authored evidence of the actions around it.</p></div>
+      <div className="section-title"><div><div className="eyebrow">The paper route</div><h2>A task travels.<br/>The team delivers.</h2></div><p>Every handoff moves through Technocore. Every employee signs their work with a separate DID before the paper reaches your desk.</p></div>
       <div className="steps">{steps.map(([n, title, copy]) => <article className="step" key={n}><b>{n}</b><h3>{title}</h3><p>{copy}</p></article>)}</div>
     </section>
   </main>;

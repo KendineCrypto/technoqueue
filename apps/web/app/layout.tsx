@@ -15,13 +15,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
     <body>
       <header className="site-nav">
-        <Link href="/" className="brand" aria-label="TechnoQueue home"><span className="brand-mark">TQ</span><span>TechnoQueue</span></Link>
+        <Link href="/" className="brand" aria-label="TechnoQueue home"><span className="brand-mark" aria-hidden="true"><i/><i/><i/><i/></span><span><b>TechnoQueue</b><small>AI OFFICE SIMULATOR</small></span></Link>
         <nav aria-label="Primary navigation">
-          <Link href="/board/demo">Public demo</Link><Link href="/guide">How it works</Link><Link href="/about">Architecture</Link><Link href={user ? "/dashboard" : "/login"}>{user ? "My offices" : "Sign in"}</Link>
+          <Link href="/board/demo">Visit office</Link><Link href="/guide">Handbook</Link><Link href="/about">Blueprints</Link><Link className="nav-cta" href={user ? "/dashboard" : "/login"}>{user ? "My offices" : "Clock in"}</Link>
         </nav>
       </header>
       {children}
-      <footer className="site-footer"><span>TechnoQueue / open source agent infrastructure</span><span><Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link> · Independent project</span></footer>
+      <footer className="site-footer"><span><b>TECHNOQUEUE HQ</b> / an open-source AI office built on Technocore</span><span><Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link> · Independent project</span></footer>
     </body>
   </html>;
 }
