@@ -1,7 +1,8 @@
 "use client";
 
-import type { AgentEvent, AgentProfile, ParsedEvent, ProviderKind, Task, TaskIntegrity, Workflow } from "@technoqueue/core";
-import { Activity, Bot, Check, Copy, KeyRound, MonitorUp, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, Unplug, UserMinus, UserPlus, X } from "lucide-react";
+import type { AgentEvent, AgentProfile, OfficeRole, ParsedEvent, ProviderKind, Task, TaskIntegrity, Workflow } from "@technoqueue/core";
+import { roleBlueprints } from "@technoqueue/core/role-blueprints";
+import { Activity, BookOpen, Bot, Check, Copy, KeyRound, LockKeyhole, MonitorUp, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, Unplug, UserMinus, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,6 +22,23 @@ const eventLabels: Record<AgentEvent["type"], string> = {
 };
 const statusLabels: Record<Task["status"], string> = { open: "INBOX", running: "IN PROGRESS", review: "REVIEW", done: "DONE", failed: "FAILED" };
 const agentsPerFloor = 8;
+const roleOptions: Array<{ value: OfficeRole; label: string }> = [
+  { value: "general", label: "Generalist" },
+  { value: "planner", label: "Planner" },
+  { value: "researcher", label: "Researcher" },
+  { value: "writer", label: "Writer" },
+  { value: "coder", label: "Developer" },
+  { value: "analyst", label: "Analyst" },
+  { value: "reviewer", label: "Reviewer" }
+];
+const constraintPresets = [
+  "Write in English.",
+  "Keep the final handoff concise.",
+  "Preserve source references beside supported claims.",
+  "Flag every assumption explicitly.",
+  "Ask the boss for a decision when a critical requirement is missing.",
+  "Do not use unsupported claims."
+];
 let workerAtlasPromise: Promise<string> | undefined;
 
 function buildTransparentWorkerAtlas(): Promise<string> {
@@ -440,31 +458,74 @@ function RunnerDialog({ workspace, runners, onClose, onChanged }: { workspace: s
   </div><footer className="session-note"><ShieldAlert size={14}/><span>The runner identity and connection token stay in <code>~/.technoqueue/runner.json</code>. Never upload that file or paste it into a support message.</span></footer></ModalFrame>;
 }
 
+function RoleBlueprintCard({ role }: { role: OfficeRole }) {
+  const blueprint = roleBlueprints[role];
+  return <section className="role-blueprint-card">
+    <header><BookOpen size={17}/><div><span>ROLE BLUEPRINT</span><strong>{blueprint.label}</strong></div><b><LockKeyhole size={12}/> LOCKED CORE</b></header>
+    <p>{blueprint.tagline}</p>
+    <div className="blueprint-mission"><span>MISSION</span>{blueprint.mission}</div>
+    <details>
+      <summary>VIEW RESPONSIBILITIES &amp; BOUNDARIES</summary>
+      <div className="blueprint-rules">
+        <section><strong>THIS EMPLOYEE WILL</strong><ul>{blueprint.responsibilities.map((rule) => <li key={rule}>{rule}</li>)}</ul></section>
+        <section><strong>THIS EMPLOYEE WILL NOT</strong><ul>{blueprint.restrictions.map((rule) => <li key={rule}>{rule}</li>)}</ul></section>
+        <section className="blueprint-output"><strong>HANDOFF CONTRACT</strong><ul>{blueprint.outputContract.map((rule) => <li key={rule}>{rule}</li>)}</ul></section>
+      </div>
+    </details>
+  </section>;
+}
+
+function CustomConstraintsEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  function addPreset(preset: string) {
+    if (value.includes(preset)) return;
+    const next = [value.trim(), preset].filter(Boolean).join("\n");
+    onChange(next.slice(0, 1200));
+  }
+  return <section className="constraint-editor">
+    <header><div><strong>YOUR CUSTOM CONSTRAINTS</strong><span>PUBLIC ON TECHNOCORE</span></div><small>{value.length}/1200</small></header>
+    <div className="constraint-presets">{constraintPresets.map((preset) => <button type="button" key={preset} className={value.includes(preset) ? "active" : ""} onClick={() => addPreset(preset)}>{value.includes(preset) ? "✓" : "+"} {preset}</button>)}</div>
+    <textarea value={value} onChange={(event) => onChange(event.target.value)} maxLength={1200} placeholder="Add office-specific preferences, tone, format, or limits…" aria-label="Custom employee constraints"/>
+    <p><LockKeyhole size={12}/> These are added after the locked blueprint. They cannot switch roles, grant tools, bypass safety rules, or authorize external actions.</p>
+  </section>;
+}
+
 function HireEmployeeDialog({ workspace, providers, onNeedProvider, onClose, onCreated }: { workspace: string; providers: ProviderConnection[]; onNeedProvider: () => void; onClose: () => void; onCreated: () => Promise<void> }) {
   const [connectionId, setConnectionId] = useState(providers[0]?.id ?? "");
   const connection = providers.find((provider) => provider.id === connectionId);
   const [model, setModel] = useState(connection ? providerDefaults[connection.provider] : "");
+  const [role, setRole] = useState<OfficeRole>("planner");
+  const [constraints, setConstraints] = useState("");
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   async function submit(form: FormData) {
     if (!connection) return;
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/employees`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId, provider: connection.provider, name: form.get("name"), role: form.get("role"), model, instructions: form.get("instructions") }) });
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/employees`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId, provider: connection.provider, name: form.get("name"), role, model, instructions: constraints }) });
       const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Hiring failed"); await onCreated();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Hiring failed"); } finally { setBusy(false); }
   }
-  return <ModalFrame kicker="HUMAN RESOURCES" title="Hire an AI employee" onClose={onClose}>{!providers.length ? <div className="empty-hire"><KeyRound size={34}/><strong>Connect an AI provider first</strong><p>Your employee needs an API account to think and work.</p><button className="pixel-button mint" onClick={onNeedProvider}>OPEN OFFICE SETUP</button></div> : <form className="form" action={submit}><div className="employee-preview"><PixelPerson variant={2}/><div><span>NEW EMPLOYEE</span><strong>{connection?.provider.toUpperCase()}</strong></div></div><div className="field-row"><div className="field"><label>Name</label><input name="name" required maxLength={40} placeholder="Ada"/></div><div className="field"><label>Job</label><select name="role" defaultValue="planner"><option value="general">Generalist</option><option value="planner">Planner</option><option value="researcher">Researcher</option><option value="writer">Writer</option><option value="coder">Developer</option><option value="analyst">Analyst</option><option value="reviewer">Reviewer</option></select></div></div><div className="field"><label>AI connection</label><select value={connectionId} onChange={(event) => { const id = event.target.value; setConnectionId(id); const next = providers.find((provider) => provider.id === id); if (next) setModel(providerDefaults[next.provider]); }}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label} · {provider.provider}</option>)}</select></div><div className="field"><label>Model</label><input value={model} onChange={(event) => setModel(event.target.value)} required maxLength={100}/></div><div className="field"><label>Standing instructions · public on Technocore</label><textarea name="instructions" maxLength={800} placeholder="How should this employee approach every assignment?"/></div>{error && <div className="form-error">⚠ {error}</div>}<div className="form-actions"><button type="button" className="pixel-button" onClick={onClose}>CANCEL</button><button className="pixel-button hire" disabled={busy}><UserPlus size={14}/> {busy ? "HIRING…" : "HIRE EMPLOYEE"}</button></div></form>}</ModalFrame>;
+  return <ModalFrame kicker="HUMAN RESOURCES · V0.3.1" title="Hire an AI employee" onClose={onClose}>{!providers.length ? <div className="empty-hire"><KeyRound size={34}/><strong>Connect an AI provider first</strong><p>Your employee needs an API account to think and work.</p><button className="pixel-button mint" onClick={onNeedProvider}>OPEN OFFICE SETUP</button></div> : <form className="form" action={submit}>
+    <div className="employee-preview"><PixelPerson variant={2}/><div><span>NEW EMPLOYEE</span><strong>{connection?.provider.toUpperCase()}</strong></div></div>
+    <div className="field-row"><div className="field"><label>Name</label><input name="name" required maxLength={40} placeholder="Ada"/></div><div className="field"><label>Job</label><select value={role} onChange={(event) => setRole(event.target.value as OfficeRole)}>{roleOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></div></div>
+    <RoleBlueprintCard role={role}/>
+    <div className="field"><label>AI connection</label><select value={connectionId} onChange={(event) => { const id = event.target.value; setConnectionId(id); const next = providers.find((provider) => provider.id === id); if (next) setModel(providerDefaults[next.provider]); }}>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label} · {provider.provider}</option>)}</select></div>
+    <div className="field"><label>Model</label><input value={model} onChange={(event) => setModel(event.target.value)} required maxLength={100}/></div>
+    <CustomConstraintsEditor value={constraints} onChange={setConstraints}/>
+    {error && <div className="form-error">⚠ {error}</div>}<div className="form-actions"><button type="button" className="pixel-button" onClick={onClose}>CANCEL</button><button className="pixel-button hire" disabled={busy}><UserPlus size={14}/> {busy ? "HIRING…" : "HIRE EMPLOYEE"}</button></div>
+  </form>}</ModalFrame>;
 }
 
 function EmployeeSettingsDialog({ workspace, agent, providers, onClose, onSaved }: { workspace: string; agent: OfficeAgent; providers: ProviderConnection[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const matching = providers.filter((provider) => provider.provider === agent.provider);
+  const [role, setRole] = useState<OfficeRole>(agent.role);
+  const [constraints, setConstraints] = useState(agent.instructions);
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   async function submit(form: FormData) {
     setBusy(true); setError("");
     try {
       const connectionId = String(form.get("connectionId") ?? "");
       const selected = providers.find((provider) => provider.id === connectionId);
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/employees/${encodeURIComponent(agent.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: form.get("name"), role: form.get("role"), model: form.get("model"), instructions: form.get("instructions"), paused: form.get("paused") === "on", ...(selected ? { connectionId, provider: selected.provider } : {}) }) });
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/employees/${encodeURIComponent(agent.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: form.get("name"), role, model: form.get("model"), instructions: constraints, paused: form.get("paused") === "on", ...(selected ? { connectionId, provider: selected.provider } : {}) }) });
       const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Update failed"); await onSaved();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Update failed"); } finally { setBusy(false); }
   }
@@ -498,10 +559,11 @@ function EmployeeSettingsDialog({ workspace, agent, providers, onClose, onSaved 
   return <ModalFrame kicker="EMPLOYEE FILE" title={agent.name} onClose={onClose}><form className="form" action={submit}>
     <div className="employee-file-head"><PixelPerson variant={spriteVariant(agent.did)}/><div><span className={`employee-status ${agent.configured && !agent.paused ? "online" : "offline"}`}>{agent.configured && !agent.paused ? "● ONLINE" : "● OFFLINE"}</span><strong>{agent.provider.toUpperCase()} · {agent.model}</strong><code>{shortDid(agent.did)}</code></div></div>
     {agent.lastError && <div className="agent-error"><strong>LAST ERROR</strong><span>{agent.lastError}</span><button type="button" onClick={() => void retryNow()} disabled={busy}>RETRY NOW</button></div>}
-    <div className="field-row"><div className="field"><label>Name</label><input name="name" defaultValue={agent.name} required maxLength={40}/></div><div className="field"><label>Job</label><select name="role" defaultValue={agent.role}><option value="general">Generalist</option><option value="planner">Planner</option><option value="researcher">Researcher</option><option value="writer">Writer</option><option value="coder">Developer</option><option value="analyst">Analyst</option><option value="reviewer">Reviewer</option></select></div></div>
+    <div className="field-row"><div className="field"><label>Name</label><input name="name" defaultValue={agent.name} required maxLength={40}/></div><div className="field"><label>Job</label><select value={role} onChange={(event) => setRole(event.target.value as OfficeRole)}>{roleOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></div></div>
+    <RoleBlueprintCard role={role}/>
     <div className="field"><label>Model</label><input name="model" defaultValue={agent.model} required maxLength={100}/></div>
     <div className="field"><label>Provider connection</label><select name="connectionId" defaultValue="" disabled={!agent.sessionOwned}><option value="">{currentConnection}</option>{matching.map((provider) => <option key={provider.id} value={provider.id}>{provider.label} · {provider.maskedKey}</option>)}</select></div>
-    <div className="field"><label>Standing instructions · public on Technocore</label><textarea name="instructions" defaultValue={agent.instructions} maxLength={800}/></div>
+    <CustomConstraintsEditor value={constraints} onChange={setConstraints}/>
     <label className="toggle"><input type="checkbox" name="paused" defaultChecked={agent.paused}/> Send this employee on a break</label>
     {!agent.sessionOwned && <div className="form-error">This is a public historical employee. Its private key is not owned by your account.</div>}{error && <div className="form-error">⚠ {error}</div>}
     <div className="form-actions"><button type="button" className="pixel-button danger" onClick={() => void fireEmployee()} disabled={busy}><UserMinus size={14}/> FIRE EMPLOYEE</button><button type="button" className="pixel-button" onClick={() => void backupIdentity()} disabled={busy || !agent.sessionOwned}><KeyRound size={14}/> BACK UP DID</button><button type="button" className="pixel-button" onClick={onClose}>CLOSE</button><button className="pixel-button primary" disabled={busy || !agent.sessionOwned}>{busy ? "SAVING…" : "SAVE EMPLOYEE"}</button></div>

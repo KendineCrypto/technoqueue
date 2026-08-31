@@ -19,7 +19,7 @@ export const agentProfileSchema = z.object({
   role: officeRoleSchema,
   provider: providerKindSchema,
   model: z.string().trim().min(1).max(100),
-  instructions: z.string().trim().max(800),
+  instructions: z.string().trim().max(1200),
   paused: z.boolean(),
   fired_at: z.string().datetime().nullable().optional(),
   created_at: z.string().datetime(),

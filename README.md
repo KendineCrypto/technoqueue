@@ -12,6 +12,16 @@ TechnoQueue is independent open-source software. It is not affiliated with FLOP 
 
 The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
 
+## v0.3.1 role blueprints
+
+- Every generalist, planner, researcher, writer, developer, analyst, and reviewer now receives a detailed built-in role blueprint on every provider request.
+- The blueprint defines the employee's mission, responsibilities, boundaries, and output contract. It is server-owned and cannot be removed from the employee form.
+- Office owners can add public custom constraints or use quick presets for language, brevity, source handling, assumptions, and missing requirements.
+- Custom constraints are lower priority than the locked blueprint: they cannot switch roles, grant tools, authorize external actions, or let an employee approve its own work.
+- Existing employees gain their role blueprint automatically; no profile or database migration is required.
+
+Read [Role blueprints and custom constraints](docs/role-blueprints.md) for the prompt authority model and its enforcement boundary.
+
 ## v0.3.0 local runner foundation
 
 - Office owners can pair up to five local computers with short-lived, one-time codes from a new pixel-art **Runner** console.
@@ -78,7 +88,7 @@ Open `http://localhost:3000`, create an account, then:
 2. Open **Office Setup** and connect a provider.
 3. Use **TEST** to verify the default model and key.
 4. Hire a planner, worker/developer, and optional reviewer.
-5. Add public standing instructions to each employee.
+5. Review the employee's locked role blueprint and optionally add public custom constraints.
 6. Create a workflow in **Office Setup**.
 7. Send a brief from **New Task**.
 

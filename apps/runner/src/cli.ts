@@ -13,7 +13,7 @@ import { hostname, homedir, platform } from "node:os";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const runnerConfigSchema = z.object({
   version: z.literal(1),

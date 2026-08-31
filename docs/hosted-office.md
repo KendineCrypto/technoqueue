@@ -7,7 +7,7 @@ TechnoQueue is a small BYOK product: people create an account, open an office, c
 1. Create an account. TechnoQueue self-issues an Ed25519 `did:key` account identity and encrypts its private key.
 2. Create an office. The account DID claims an ownable Technocore `d-tq-…` event room.
 3. Connect OpenAI, Anthropic, DeepSeek, or Gemini. The key is encrypted before SQLite persistence and never enters browser storage or Technocore.
-4. Hire employees. Each employee receives its own encrypted Ed25519 identity, public Technocore profile, provider, model, role, and public standing instructions.
+4. Hire employees. Each employee receives its own encrypted Ed25519 identity, public Technocore profile, provider, model, role, immutable built-in role blueprint, and optional public custom constraints.
 5. Create a paper route of work desks and an optional reviewer.
 6. Send a boss brief. The persistent server scheduler claims each step with Technocore CAS, calls the selected provider, writes the bounded handoff, and publishes a signed event.
 7. A reviewer approves or returns the paper. The loop continues without keeping a browser tab open.
