@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgentEvent, AgentProfile, ParsedEvent, ProviderKind, Task, TaskIntegrity, Workflow } from "@technoqueue/core";
-import { Activity, Bot, KeyRound, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, UserMinus, UserPlus, X } from "lucide-react";
+import { Activity, Bot, Check, KeyRound, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, UserMinus, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -150,6 +150,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
   const counts = useMemo(() => Object.fromEntries(["open", "running", "review", "done", "failed"].map((status) => [status, tasks.filter((task) => task.status === status).length])), [tasks]);
   const openTasks = tasks.filter((task) => task.status === "open");
   const visibleAgents = agents.slice(floor * agentsPerFloor, (floor + 1) * agentsPerFloor);
+  const firstDayComplete = providers.length > 0 && officeAgents.length > 0 && workflows.length > 0 && tasks.length > 0;
 
   return <main className={`game-shell ${workerAtlas ? "atlas-ready" : ""} ${workerAtlas && !workerAtlas.cutout ? "atlas-fallback" : ""}`} style={{ "--worker-atlas": workerAtlas ? `url(${workerAtlas.url})` : "none" } as CSSProperties}>
     <header className="game-topbar">
@@ -159,6 +160,17 @@ export function LiveBoard({ workspace }: { workspace: string }) {
     </header>
 
     {integrityAlert ? <div className="game-alert"><ShieldAlert size={18}/><strong>UNAUTHORIZED CHANGE BLOCKED</strong><span>{integrityAlert} No AI provider was called.</span><button className="pixel-button" disabled={repairing} onClick={() => void repairIntegrity()}>{repairing ? "REPAIRING…" : "RESTORE TRUSTED STATE"}</button></div> : confirmationRequired ? <div className="game-alert"><ShieldAlert size={18}/><strong>ONE-TIME SECURITY REVIEW</strong><span>This office predates the state firewall. Review the employees, workflows and task files shown below, then activate protected execution.</span><button className="pixel-button" disabled={repairing} onClick={() => void confirmIntegrity()}>{repairing ? "VERIFYING…" : "I REVIEWED IT · ACTIVATE"}</button></div> : degraded && <div className="game-alert"><strong>CONNECTION LOST!</strong><span>Showing the last known state of the office.</span><small>{updatedAt ? `Last synced ${time(updatedAt)}` : "No cached state"}</small></div>}
+
+    {canManage && !loading && !firstDayComplete && <FirstDayChecklist
+      providers={providers.length}
+      employees={officeAgents.length}
+      workflows={workflows.length}
+      tasks={tasks.length}
+      onSetup={() => setSetupOpen(true)}
+      onHire={() => providers.length ? setHireOpen(true) : setSetupOpen(true)}
+      onWorkflow={() => setSetupOpen(true)}
+      onTask={() => workflows.length ? setDialog(true) : setSetupOpen(true)}
+    />}
 
     <section className="game-dashboard">
       <div className="office-card">
@@ -196,6 +208,73 @@ export function LiveBoard({ workspace }: { workspace: string }) {
       <EmployeeSettingsDialog workspace={workspace} agent={editingAgent} providers={providers} onClose={() => setEditingAgent(undefined)} onSaved={async () => { setEditingAgent(undefined); await refresh(); }}/>
     )}
   </main>;
+}
+
+function FirstDayChecklist({ providers, employees, workflows, tasks, onSetup, onHire, onWorkflow, onTask }: { providers: number; employees: number; workflows: number; tasks: number; onSetup: () => void; onHire: () => void; onWorkflow: () => void; onTask: () => void }) {
+  const steps = [
+    { label: "CONNECT AI", detail: "Add and test a provider", done: providers > 0, action: onSetup },
+    { label: "HIRE", detail: "Give an AI employee a desk", done: employees > 0, action: onHire },
+    { label: "BUILD ROUTE", detail: "Choose how the paper travels", done: workflows > 0, action: onWorkflow },
+    { label: "SEND TASK", detail: "Write your first boss brief", done: tasks > 0, action: onTask }
+  ];
+  const complete = steps.filter((step) => step.done).length;
+  const current = steps.findIndex((step) => !step.done);
+  return <section className="first-day-card" aria-label="First day office setup checklist">
+    <header><div><span className="tiny-label">BOSS HANDBOOK</span><strong>YOUR FIRST DAY AT HQ</strong></div><div className="first-day-score"><b>{complete}</b><span>/ 4 READY</span></div></header>
+    <div className="first-day-steps">{steps.map((step, index) => <button type="button" className={`${step.done ? "is-done" : ""} ${index === current ? "is-current" : ""}`} onClick={step.action} key={step.label}><b>{step.done ? <Check size={13}/> : index + 1}</b><span><strong>{step.label}</strong><small>{step.detail}</small></span>{index === current && <em>DO THIS NEXT</em>}</button>)}</div>
+  </section>;
+}
+
+const demoEmployees = [
+  { name: "Maya", role: "planner", provider: "gemini", mood: "working", bubble: "PLANNING IT!", variant: 1 },
+  { name: "Arthur", role: "researcher", provider: "deepseek", mood: "working", bubble: "TIK TIK TIK…", variant: 4 },
+  { name: "Ada", role: "reviewer", provider: "claude", mood: "reviewing", bubble: "CHECKING IT!", variant: 2 }
+] as const;
+
+export function PublicDemoBoard() {
+  const [workerAtlas, setWorkerAtlas] = useState<{ url: string; cutout: boolean }>();
+  useEffect(() => { let active = true; void buildTransparentWorkerAtlas().then((url) => { if (active) setWorkerAtlas({ url, cutout: true }); }).catch(() => { if (active) setWorkerAtlas({ url: "/game/office-workers.png", cutout: false }); }); return () => { active = false; }; }, []);
+  return <main className={`game-shell ${workerAtlas ? "atlas-ready" : ""} ${workerAtlas && !workerAtlas.cutout ? "atlas-fallback" : ""}`} style={{ "--worker-atlas": workerAtlas ? `url(${workerAtlas.url})` : "none" } as CSSProperties}>
+    <header className="game-topbar">
+      <Link href="/" className="game-brand"><span className="game-logo" aria-hidden="true"><i/><i/><i/><i/></span><div><span className="game-kicker">PUBLIC TOUR · NO ACCOUNT NEEDED</span><h1>TechnoQueue HQ</h1></div></Link>
+      <div className="game-workspace"><span>WORKSPACE</span><strong>DEMO</strong></div>
+      <div className="game-top-actions"><div className="server-chip"><span/>GUIDED DEMO</div><Link className="pixel-button" href="/guide">HANDBOOK</Link><Link className="pixel-button primary" href="/signup"><Plus size={15}/> OPEN YOUR OFFICE</Link></div>
+    </header>
+
+    <div className="game-alert demo-tour-alert"><Bot size={18}/><strong>TOUR MODE</strong><span>This is a safe sample office. No provider is called and no record is written to Technocore.</span><small>EXPLORE THE WORKFLOW</small></div>
+
+    <section className="game-dashboard">
+      <div className="office-card">
+        <div className="office-card-head"><div><span className="tiny-label">SAMPLE OFFICE</span><strong>3 EMPLOYEES · 1 ACTIVE TASK</strong></div><div className="floor-switcher"><button disabled aria-label="Previous floor">‹</button><span>FLOOR 1 / 1</span><button disabled aria-label="Next floor">›</button></div><div className="office-legend"><span><i className="legend-dot working"/> Working</span><span><i className="legend-dot review"/> Reviewing</span><span><i className="legend-dot idle"/> Available</span></div></div>
+        <div className="office-room" aria-label="Public pixel art office demonstration">
+          <div className="sun-stripe"/><div className="boss-station"><div className="speech-bubble boss-bubble"><b>THE BOSS</b><span>Research Arthur Hayes and prepare a concise brief.</span></div><Link className="boss-inbox" href="/signup" aria-label="Create your own office"><i style={{ "--paper-y": "-14px", "--paper-x": "22px", "--paper-rotate": "-3deg" } as CSSProperties}/><span>1</span><small>INBOX</small></Link></div><div className="paper-route route-one" aria-hidden="true"/><div className="paper-route route-two" aria-hidden="true"/>
+          <div className="employee-floor employee-count-3">{demoEmployees.map((employee, index) => <DemoEmployeeDesk employee={employee} index={index} key={employee.name}/>)}</div>
+          <div className="archive-corner"><span className="archive-label">ARCHIVE</span><div className="archive-box"><i/><i/><i/></div><strong>12</strong><small>DONE</small></div>
+        </div>
+      </div>
+
+      <aside className="game-sidebar">
+        <section className="hud-card stats-card"><header><span>TODAY AT HQ</span><span className="pixel-sun">☀</span></header><div className="stat-grid"><GameStat value={3} label="ONLINE" tone="mint"/><GameStat value={0} label="WAITING" tone="gold"/><GameStat value={1} label="REVIEW" tone="coral"/><GameStat value={12} label="DONE" tone="blue"/></div></section>
+        <section className="hud-card activity-card"><header><span>OFFICE LOG</span><span className="live-pip">● SAMPLE</span></header><div className="game-activity-list">{[
+          ["09:42", "Ada", "started reviewing", "TQ-DEMO"], ["09:41", "Arthur", "sent research to review", "TQ-DEMO"], ["09:39", "Arthur", "picked up the research file", "TQ-DEMO"], ["09:38", "Maya", "completed the plan", "TQ-DEMO"], ["09:37", "Boss", "created a new assignment", "TQ-DEMO"]
+        ].map(([at, name, action, task]) => <div className="game-activity" key={`${at}-${name}`}><time>{at}</time><div><p><strong>{name}</strong> {action} <b>{task}</b></p><span>DEMO EVENT</span></div></div>)}</div></section>
+      </aside>
+    </section>
+
+    <section className="mission-dock">
+      <header className="mission-head"><div><span className="tiny-label">SAMPLE PAPER TRAIL</span><h2>Task Files</h2></div><p>See how one assignment moves across specialized desks before it reaches the archive.</p></header>
+      <div className="mission-lanes"><DemoLane status="INBOX"/><DemoLane status="IN PROGRESS"/><DemoLane status="REVIEW" active/><DemoLane status="DONE"/></div>
+    </section>
+  </main>;
+}
+
+function DemoEmployeeDesk({ employee, index }: { employee: typeof demoEmployees[number]; index: number }) {
+  return <div className={`employee-station mood-${employee.mood}`} style={{ "--employee-delay": `${index * 80}ms` } as CSSProperties}><div className="speech-bubble employee-bubble"><span>{employee.bubble}</span></div><div className="employee-nameplate"><strong>{employee.name}</strong><span>{employee.provider} · {employee.role}</span></div><PixelPerson variant={employee.variant}/><div className="pixel-desk"><div className="desk-monitor"><span/><i/></div><div className="desk-keyboard"><i/><i/><i/><i/></div><div className="desk-mug"/>{index === 2 && <span className="moving-paper paper-reviewing"><span>TQ-DEMO</span></span>}<div className="desk-drawers"><i/><i/></div></div></div>;
+}
+
+function DemoLane({ status, active = false }: { status: string; active?: boolean }) {
+  const slug = status.toLowerCase().replaceAll(" ", "-");
+  return <article className={`mission-lane lane-${slug}`}><header><span>{status}</span><b>{active ? "01" : "00"}</b></header><div>{active ? <div className="task-file demo-task-file"><div className="file-fold"/><div className="file-pin"/><span className="file-code">TQ-DEMO</span><strong>Who is Arthur Hayes?</strong><footer><span>RESEARCH</span><i className="file-integrity valid"/></footer></div> : <p>No files on this shelf.</p>}</div></article>;
 }
 
 function deriveAgents(events: ParsedEvent[], profiles: OfficeAgent[]): AgentView[] {

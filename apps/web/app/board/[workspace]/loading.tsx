@@ -1,1 +1,1 @@
-export default function Loading() { return <main className="page-shell"><div className="eyebrow">Connecting to Technocore</div><h1 style={{ fontSize: 52 }}>Resolving live state…</h1></main>; }
+export default function Loading() { return <main className="office-loading"><div><span className="loading-pixels"><i/><i/><i/></span><div className="eyebrow">CONNECTING TO TECHNOCORE</div><h1>Opening the office…</h1><p>Reading the task files, employee desks, and signed office log.</p></div></main>; }

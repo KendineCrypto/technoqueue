@@ -338,6 +338,7 @@ body:has(.game-shell) .site-footer { display: none; }
 .guide-steps { list-style: none; padding: 0; margin: 70px 0; border-top: 1px solid var(--line-bright); }.guide-steps li { display: grid; grid-template-columns: 70px 1fr; gap: 20px; padding: 28px 0; border-bottom: 1px solid var(--line); }.guide-steps li > b { color: var(--lime); font: 700 12px var(--font-geist-mono); }.guide-steps h2 { margin: 0 0 10px; }.guide-steps p { margin: 0; max-width: 760px; color: var(--muted); line-height: 1.65; }.guide-roles { display: grid; grid-template-columns: repeat(3,1fr); border: 1px solid var(--line); }.guide-roles > header { grid-column: 1/-1; padding: 28px; border-bottom: 1px solid var(--line); }.guide-roles > header h2 { margin-bottom: 0; }.guide-roles article { padding: 28px; border-right: 1px solid var(--line); }.guide-roles article:last-child { border-right: 0; }.guide-roles article > span { color: var(--lime); font: 10px var(--font-geist-mono); }.guide-roles article p { color: var(--muted); line-height: 1.6; font-size: 13px; }
 @media (max-width: 760px) { .guide-roles { grid-template-columns: 1fr; }.guide-roles article { border-right: 0; border-bottom: 1px solid var(--line); } }
 .provider-test-ok { margin: 10px 0; padding: 9px 11px; color: #17433d; background: #8bd8bd; border: 2px solid #275d59; font: 800 8px var(--font-geist-mono); }.agent-error button { margin-top: 8px; padding: 6px 9px; color: #fff3d8; background: #9f4e42; border: 2px solid #542f35; font: 800 8px var(--font-geist-mono); cursor: pointer; }
+.demo-tour-alert { background: #aee4d0; border-color: #275d59; color: #17433d; box-shadow: inset 0 -3px 0 #65bba7; }.demo-tour-alert strong { color: #246d66; }.demo-task-file { cursor: default; }
 @media (max-width: 760px) { .identity-vault { grid-template-columns: 1fr; } }
 
 /* Shared Pixel HQ — the public site and the office now belong to one game world. */
@@ -568,4 +569,31 @@ body::before { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   body * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+}
+
+/* v0.2.1 — first-day onboarding and resilient beta states */
+.first-day-card { max-width: 1800px; margin: 0 auto 14px; color: #3d3343; background: #f8dca9; border: 3px solid #171725; box-shadow: 0 6px 0 #171725; }
+.first-day-card > header { min-height: 48px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: #fff4d3; background: #d87148; border-bottom: 3px solid #171725; }
+.first-day-card > header > div:first-child { display: grid; gap: 4px; }.first-day-card > header .tiny-label { color: #4e303b; }.first-day-card > header strong { font-size: 10px; letter-spacing: .04em; }
+.first-day-score { display: flex; align-items: baseline; gap: 5px; color: #3d3343; background: #fff1ca; border: 2px solid #3d3343; box-shadow: inset 0 -2px 0 #d7aa74; padding: 6px 8px; }.first-day-score b { font-size: 14px; }.first-day-score span { font-size: 6px; font-weight: 900; }
+.first-day-steps { display: grid; grid-template-columns: repeat(4,1fr); gap: 3px; padding: 3px; background: #3d3343; }
+.first-day-steps button { min-height: 68px; padding: 9px; display: grid; grid-template-columns: 27px 1fr; align-items: center; gap: 8px; position: relative; text-align: left; color: #65494d; background: #fff1ca; border: 0; box-shadow: inset 0 -4px 0 #d7aa74; font-family: inherit; cursor: pointer; }
+.first-day-steps button:hover { filter: brightness(1.04); }.first-day-steps button > b { width: 27px; height: 27px; display: grid; place-items: center; color: #fff4d3; background: #c15e47; border: 2px solid #3d3343; font-size: 8px; }.first-day-steps button > span { display: grid; gap: 4px; }.first-day-steps button strong { font-size: 8px; }.first-day-steps button small { color: #90685b; font-size: 6px; line-height: 1.35; }.first-day-steps button em { position: absolute; top: -8px; right: 5px; padding: 4px 5px; color: #fff4d3; background: #2d8e88; border: 2px solid #29454a; font-size: 5px; font-style: normal; font-weight: 900; letter-spacing: .08em; animation: game-blink 1.3s steps(2) infinite; }
+.first-day-steps button.is-done { background: #bce7cf; box-shadow: inset 0 -4px 0 #78bca5; }.first-day-steps button.is-done > b { color: #17433d; background: #75d1ad; border-color: #275d59; }.first-day-steps button.is-done small { color: #397064; }.first-day-steps button.is-current { z-index: 2; outline: 3px solid #f4bd4f; outline-offset: -3px; }
+
+.dashboard-empty { min-height: 260px; padding: 28px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: left; background: #fff1ca; }
+.dashboard-empty > span { color: #a84d43; font-size: 7px; font-weight: 900; letter-spacing: .14em; }.dashboard-empty > strong { margin-top: 12px; color: #3d3343; font-size: 17px; text-transform: uppercase; }.dashboard-empty > p { max-width: 520px; margin: 10px 0 22px; color: #765b52; font-size: 8px; line-height: 1.65; }
+.dashboard-empty > div { display: grid; grid-template-columns: 23px auto 23px auto 23px auto 23px auto; align-items: center; gap: 5px; }.dashboard-empty i { width: 23px; height: 23px; display: grid; place-items: center; color: #fff4d3; background: #df7b46; border: 2px solid #3d3343; font-size: 7px; font-style: normal; font-weight: 900; }.dashboard-empty b { color: #79574f; font-size: 6px; }
+
+.office-loading { min-height: 100vh; padding: 30px; display: grid; place-items: center; color: #3d3343; background-color: #29283a; background-image: linear-gradient(45deg,rgba(255,255,255,.025) 25%,transparent 25%),linear-gradient(-45deg,rgba(255,255,255,.025) 25%,transparent 25%); background-size: 8px 8px; }
+.office-loading > div { width: min(620px,100%); padding: 42px; background: #f8dca9; border: 4px solid #171725; box-shadow: inset 0 -9px 0 #d49b73, 8px 8px 0 #171725; }.office-loading h1 { margin: 24px 0 12px; font: 900 clamp(32px,6vw,58px)/1 var(--font-geist-mono); text-shadow: 4px 4px 0 #e8b87d; }.office-loading p { color: #765b52; font-size: 8px; line-height: 1.7; }
+.loading-pixels { margin-bottom: 28px; display: flex; gap: 6px; }.loading-pixels i { width: 13px; height: 13px; background: #df7b46; border: 3px solid #3d3343; animation: loading-pixel .9s steps(2) infinite; }.loading-pixels i:nth-child(2) { background: #65c3b4; animation-delay: .15s; }.loading-pixels i:nth-child(3) { background: #f4bd4f; animation-delay: .3s; }
+@keyframes loading-pixel { 50% { transform: translateY(-7px); } }
+
+@media (max-width: 760px) {
+  .game-topbar { grid-template-columns: 1fr; align-items: stretch; }.game-top-actions { width: 100%; grid-column: 1 / -1; justify-self: stretch; display: grid; grid-template-columns: repeat(auto-fit,minmax(100px,1fr)); gap: 5px; }.game-top-actions .pixel-button { min-width: 0; text-align: center; }.game-alert { flex-wrap: wrap; }.game-alert span { flex: 1 1 230px; }.game-alert small { margin-left: 0; }
+  .first-day-steps { grid-template-columns: repeat(2,1fr); }.first-day-card > header strong { font-size: 8px; }.first-day-steps button { min-height: 64px; }.dashboard-empty > div { grid-template-columns: 23px auto 23px auto; row-gap: 9px; }
+}
+@media (max-width: 430px) {
+  .first-day-steps { grid-template-columns: 1fr; }.first-day-card > header { align-items: flex-start; }.first-day-score { flex: 0 0 auto; }.game-top-actions { grid-template-columns: 1fr 1fr; }.game-top-actions .pixel-button:last-child:nth-child(3) { grid-column: 1 / -1; }
 }

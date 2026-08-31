@@ -12,6 +12,14 @@ TechnoQueue is independent open-source software. It is not affiliated with FLOP 
 
 The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
 
+## v0.2.1 public beta
+
+- The full product now shares one pixel-art office design system.
+- `/board/demo` is a safe, account-free Tour Mode with sample employees and a sample paper route. It never calls a provider or writes demo records to Technocore.
+- New office owners receive an in-product first-day checklist: connect an AI, hire an employee, build a route, and send the first task.
+- Empty, loading, unavailable, and not-found states explain what happened without substituting mock data for a real office.
+- Mobile office controls wrap into touch-friendly rows while keeping the desktop room layout intact.
+
 ## What is stored where
 
 Technocore is the public coordination and evidence layer:
