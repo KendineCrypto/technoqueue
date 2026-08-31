@@ -1,13 +1,14 @@
 {
   "name": "@technoqueue/web",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:runner": "tsx tests/runner-flow.test.ts"
   },
   "dependencies": {
     "@technoqueue/core": "workspace:*",
@@ -23,6 +24,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.0.0",
-    "eslint-config-next": "^15.5.0"
+    "eslint-config-next": "^15.5.0",
+    "tsx": "^4.20.0"
   }
 }

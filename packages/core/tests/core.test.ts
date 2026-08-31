@@ -25,11 +25,14 @@ import {
   parseEvent,
   prepareTaskForStorage,
   requestChanges,
+  runnerHeartbeatPayload,
+  runnerPairingPayload,
   finishOfficeReview,
   loadIdentity,
   saveEncryptedIdentity,
   sha256,
   signPayload,
+  verifyDidSignature,
   serializeTask,
   submitResult,
   taskSchema,
@@ -63,6 +66,40 @@ describe("identity", () => {
       const loaded = await loadIdentity(path, "correct horse battery staple"); expect(loaded.did).toBe(created.did);
       await expect(loadIdentity(path, "wrong passphrase")).rejects.toThrow();
     } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+  it("verifies signatures directly from an Ed25519 did:key", () => {
+    const identity = createIdentity();
+    const payload = "technoqueue signed runner message";
+    const signature = signPayload(identity, payload);
+    expect(verifyDidSignature(identity.did, payload, signature)).toBe(true);
+    expect(verifyDidSignature(identity.did, `${payload}!`, signature)).toBe(false);
+    expect(verifyDidSignature(createIdentity().did, payload, signature)).toBe(false);
+  });
+});
+
+describe("local runner protocol", () => {
+  it("canonicalizes pairing codes and heartbeat capabilities", () => {
+    const identity = createIdentity();
+    const pairing = runnerPairingPayload({
+      code: "AB12C-DE34F",
+      challenge: "challenge",
+      did: identity.did,
+      label: "Fatih PC",
+      platform: "win32",
+      version: "0.3.0"
+    });
+    expect(pairing).toContain('"code":"AB12CDE34F"');
+    const heartbeat = runnerHeartbeatPayload({
+      runnerId: "runner-abcdefgh",
+      sequence: 1,
+      label: "Fatih PC",
+      platform: "win32",
+      version: "0.3.0",
+      capabilities: ["heartbeat-v1", "identity-v1"]
+    });
+    expect(heartbeat.indexOf("heartbeat-v1")).toBeLessThan(heartbeat.indexOf("identity-v1"));
+    const signature = signPayload(identity, heartbeat);
+    expect(verifyDidSignature(identity.did, heartbeat, signature)).toBe(true);
   });
 });
 

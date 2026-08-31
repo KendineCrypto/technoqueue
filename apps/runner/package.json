@@ -1,5 +1,5 @@
 {
-  "name": "@technoqueue/agent",
+  "name": "@technoqueue/runner",
   "version": "0.3.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@inquirer/prompts": "^7.8.0",
     "@technoqueue/core": "workspace:*",
     "commander": "^14.0.0",
-    "tsx": "^4.20.0"
+    "tsx": "^4.20.0",
+    "zod": "^4.0.0"
   }
 }

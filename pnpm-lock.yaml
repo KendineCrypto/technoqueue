@@ -34,6 +34,21 @@ importers:
         specifier: ^4.20.0
         version: 4.23.12
 
+  apps/runner:
+    dependencies:
+      '@technoqueue/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      commander:
+        specifier: ^14.0.0
+        version: 14.0.3
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.12
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
   apps/web:
     dependencies:
       '@technoqueue/core':
@@ -73,6 +88,9 @@ importers:
       eslint-config-next:
         specifier: ^15.5.0
         version: 15.5.23(eslint@9.39.5)(typescript@5.9.3)
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.12
 
   packages/core:
     dependencies:

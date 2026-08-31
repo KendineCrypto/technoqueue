@@ -12,6 +12,15 @@ TechnoQueue is independent open-source software. It is not affiliated with FLOP 
 
 The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
 
+## v0.3.0 local runner foundation
+
+- Office owners can pair up to five local computers with short-lived, one-time codes from a new pixel-art **Runner** console.
+- Every runner creates a separate Ed25519 `did:key` locally and signs both pairing proof and monotonically sequenced heartbeats.
+- Pairing codes and runner bearer tokens are stored only as SHA-256 hashes on the server. Owners can revoke a runner immediately from the office.
+- The office shows paired, online, recent, and offline runner states. This foundation release deliberately does not grant filesystem access or execute shell commands.
+
+The next runner milestone will add explicit project grants and approval-gated jobs on top of this identity channel. Read [Local runner security](docs/local-runner.md) before pairing a machine.
+
 ## v0.2.1 public beta
 
 - The full product now shares one pixel-art office design system.
@@ -72,6 +81,18 @@ Open `http://localhost:3000`, create an account, then:
 5. Add public standing instructions to each employee.
 6. Create a workflow in **Office Setup**.
 7. Send a brief from **New Task**.
+
+### Pair a local runner (developer preview)
+
+The runner is optional in v0.3.0; hosted BYOK employees continue to work without it.
+
+1. Open your office and click **Runner**.
+2. Enter a computer label and create a one-time pairing code.
+3. In a TechnoQueue source checkout on that computer, run the command shown in the panel.
+4. Start presence heartbeats with `pnpm runner start`.
+5. Return to the office. The Runner button turns green after the first signed heartbeat.
+
+Use `pnpm runner status` to inspect the connection. To disconnect it, first use the unplug button in the office, then run `pnpm runner forget` on that computer. Revocation takes effect immediately; deleting only the local file does not revoke the server token.
 
 The server scheduler keeps working after the browser tab closes. Click an employee to pause, change provider/model, retry an error, back up its DID, or fire it.
 
@@ -163,6 +184,7 @@ Packages:
 ```text
 apps/web       Next.js product, accounts, vault, scheduler, pixel office
 apps/agent     optional standalone worker/reviewer CLI
+apps/runner    signed local runner pairing and presence CLI
 packages/core  Technocore client, schemas, crypto, queue and providers
 docs           architecture and hosted product notes
 ```

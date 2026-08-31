@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgentEvent, AgentProfile, ParsedEvent, ProviderKind, Task, TaskIntegrity, Workflow } from "@technoqueue/core";
-import { Activity, Bot, Check, KeyRound, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, UserMinus, UserPlus, X } from "lucide-react";
+import { Activity, Bot, Check, Copy, KeyRound, MonitorUp, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, Unplug, UserMinus, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type TaskView = Task & { integrity: TaskIntegrity };
 type ProviderConnection = { id: string; provider: ProviderKind; label: string; maskedKey: string; createdAt: string };
 type OfficeAgent = AgentProfile & { sessionOwned: boolean; configured: boolean; connectionLabel?: string; connectionMaskedKey?: string; runningTaskId?: string; lastError?: string };
+type LocalRunner = { id: string; did: string; label: string; platform: "win32" | "darwin" | "linux"; version: string; capabilities: string[]; lastSeenAt: number | null; state: "paired" | "online" | "recent" | "offline"; createdAt: string };
 type AgentView = { did: string; label: string; role: string; lastSeen: string; state: "active" | "recent" | "offline"; profile?: OfficeAgent };
 type EmployeeMood = "working" | "reviewing" | "done" | "idle" | "offline";
 
@@ -82,10 +83,12 @@ export function LiveBoard({ workspace }: { workspace: string }) {
   const [officeAgents, setOfficeAgents] = useState<OfficeAgent[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [providers, setProviders] = useState<ProviderConnection[]>([]);
+  const [runners, setRunners] = useState<LocalRunner[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [eventRoom, setEventRoom] = useState(`tq-${workspace}`);
   const [setupOpen, setSetupOpen] = useState(false);
   const [hireOpen, setHireOpen] = useState(false);
+  const [runnerOpen, setRunnerOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<OfficeAgent>();
   const [workerAtlas, setWorkerAtlas] = useState<{ url: string; cutout: boolean }>();
   const lastRuntimeWake = useRef(0);
@@ -102,8 +105,8 @@ export function LiveBoard({ workspace }: { workspace: string }) {
       }
       const taskData = await taskRes.json() as { tasks: TaskView[]; updatedAt: string };
       const eventData = await eventRes.json() as { events: ParsedEvent[] };
-      const officeData = await officeRes.json() as { agents: OfficeAgent[]; workflows: Workflow[]; providers: ProviderConnection[]; canManage?: boolean; eventRoom?: string; integrity?: { requiresConfirmation?: boolean } };
-      setTasks(taskData.tasks); setEvents(eventData.events); setOfficeAgents(officeData.agents); setWorkflows(officeData.workflows); setProviders(officeData.providers); setAgents(deriveAgents(eventData.events, officeData.agents));
+      const officeData = await officeRes.json() as { agents: OfficeAgent[]; workflows: Workflow[]; providers: ProviderConnection[]; runners?: LocalRunner[]; canManage?: boolean; eventRoom?: string; integrity?: { requiresConfirmation?: boolean } };
+      setTasks(taskData.tasks); setEvents(eventData.events); setOfficeAgents(officeData.agents); setWorkflows(officeData.workflows); setProviders(officeData.providers); setRunners(officeData.runners ?? []); setAgents(deriveAgents(eventData.events, officeData.agents));
       setCanManage(Boolean(officeData.canManage));
       if (officeData.eventRoom) setEventRoom(officeData.eventRoom);
       setConfirmationRequired(Boolean(officeData.integrity?.requiresConfirmation));
@@ -149,6 +152,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
   useEffect(() => { setFloor((current) => Math.min(current, floorCount - 1)); }, [floorCount]);
   const counts = useMemo(() => Object.fromEntries(["open", "running", "review", "done", "failed"].map((status) => [status, tasks.filter((task) => task.status === status).length])), [tasks]);
   const openTasks = tasks.filter((task) => task.status === "open");
+  const onlineRunners = runners.filter((runner) => runner.state === "online").length;
   const visibleAgents = agents.slice(floor * agentsPerFloor, (floor + 1) * agentsPerFloor);
   const firstDayComplete = providers.length > 0 && officeAgents.length > 0 && workflows.length > 0 && tasks.length > 0;
 
@@ -156,7 +160,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
     <header className="game-topbar">
       <div className="game-brand"><span className="game-logo" aria-hidden="true"><i/><i/><i/><i/></span><div><span className="game-kicker">AI OFFICE SIMULATOR</span><h1>TechnoQueue HQ</h1></div></div>
       <div className="game-workspace"><span>WORKSPACE</span><strong>{workspace}</strong></div>
-      <div className="game-top-actions"><div className={`server-chip ${degraded ? "is-degraded" : ""}`}><span/>{degraded ? "CONNECTION DEGRADED" : "TECHNOCORE ONLINE"}</div>{canManage ? <><button className="pixel-button" onClick={() => setSetupOpen(true)}><Settings2 size={14}/> OFFICE SETUP</button><button className="pixel-button hire" onClick={() => setHireOpen(true)}><UserPlus size={14}/> HIRE</button><button className="pixel-button primary" onClick={() => setDialog(true)}><Plus size={15}/> NEW TASK</button></> : <Link className="pixel-button hire" href="/signup">CREATE YOUR OFFICE</Link>}</div>
+      <div className="game-top-actions"><div className={`server-chip ${degraded ? "is-degraded" : ""}`}><span/>{degraded ? "CONNECTION DEGRADED" : "TECHNOCORE ONLINE"}</div>{canManage ? <><button className={`pixel-button runner-button ${onlineRunners ? "is-online" : ""}`} onClick={() => setRunnerOpen(true)}><MonitorUp size={14}/> RUNNER {onlineRunners ? `· ${onlineRunners}` : ""}</button><button className="pixel-button" onClick={() => setSetupOpen(true)}><Settings2 size={14}/> OFFICE SETUP</button><button className="pixel-button hire" onClick={() => setHireOpen(true)}><UserPlus size={14}/> HIRE</button><button className="pixel-button primary" onClick={() => setDialog(true)}><Plus size={15}/> NEW TASK</button></> : <Link className="pixel-button hire" href="/signup">CREATE YOUR OFFICE</Link>}</div>
     </header>
 
     {integrityAlert ? <div className="game-alert"><ShieldAlert size={18}/><strong>UNAUTHORIZED CHANGE BLOCKED</strong><span>{integrityAlert} No AI provider was called.</span><button className="pixel-button" disabled={repairing} onClick={() => void repairIntegrity()}>{repairing ? "REPAIRING…" : "RESTORE TRUSTED STATE"}</button></div> : confirmationRequired ? <div className="game-alert"><ShieldAlert size={18}/><strong>ONE-TIME SECURITY REVIEW</strong><span>This office predates the state firewall. Review the employees, workflows and task files shown below, then activate protected execution.</span><button className="pixel-button" disabled={repairing} onClick={() => void confirmIntegrity()}>{repairing ? "VERIFYING…" : "I REVIEWED IT · ACTIVATE"}</button></div> : degraded && <div className="game-alert"><strong>CONNECTION LOST!</strong><span>Showing the last known state of the office.</span><small>{updatedAt ? `Last synced ${time(updatedAt)}` : "No cached state"}</small></div>}
@@ -203,6 +207,9 @@ export function LiveBoard({ workspace }: { workspace: string }) {
     )}
     {hireOpen && (
       <HireEmployeeDialog workspace={workspace} providers={providers} onNeedProvider={() => { setHireOpen(false); setSetupOpen(true); }} onClose={() => setHireOpen(false)} onCreated={async () => { setHireOpen(false); await refresh(); }}/>
+    )}
+    {runnerOpen && (
+      <RunnerDialog workspace={workspace} runners={runners} onClose={() => setRunnerOpen(false)} onChanged={refresh}/>
     )}
     {editingAgent && (
       <EmployeeSettingsDialog workspace={workspace} agent={editingAgent} providers={providers} onClose={() => setEditingAgent(undefined)} onSaved={async () => { setEditingAgent(undefined); await refresh(); }}/>
@@ -386,6 +393,51 @@ function OfficeSetupDialog({ workspace, providers, agents, workflows, onClose, o
     <section className="setup-section"><header><KeyRound size={17}/><div><strong>AI PROVIDERS</strong><span>Encrypted at rest · never sent to Technocore</span></div></header><div className="provider-list">{providers.map((provider) => <div className={`provider-card provider-${provider.provider}`} key={provider.id}><i/><div><strong>{provider.label}</strong><span>{provider.provider} · {provider.maskedKey}</span></div><button type="button" onClick={() => void testProvider(provider)} disabled={busy} aria-label={`Test ${provider.label}`}>TEST</button><button type="button" onClick={() => void removeProvider(provider.id)} aria-label={`Remove ${provider.label}`}><Trash2 size={14}/></button></div>)}{!providers.length && <p className="setup-empty">No provider connected yet.</p>}</div>{testStatus && <div className="provider-test-ok">{testStatus}</div>}<form className="compact-form" action={connect}><div className="field-row"><div className="field"><label>Provider</label><select name="provider" defaultValue="deepseek"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Claude / Anthropic</option><option value="gemini">Google Gemini</option></select></div><div className="field"><label>Connection name</label><input name="label" required defaultValue="My AI account" maxLength={40}/></div></div><div className="field"><label>API key</label><input name="apiKey" type="password" autoComplete="off" required placeholder="Encrypted before it is stored"/></div><button className="pixel-button mint" disabled={busy}><KeyRound size={13}/> CONNECT PROVIDER</button></form></section>
     <section className="setup-section"><header><Bot size={17}/><div><strong>WORKFLOWS</strong><span>Choose which desk receives the paper next</span></div></header><div className="workflow-list">{workflows.map((workflow) => <div className="workflow-card" key={workflow.id}><strong>{workflow.name}</strong><div>{workflow.steps.map((step, index) => <span key={`${step.agent_id}-${index}`}>{step.label}{index < workflow.steps.length - 1 && <b>→</b>}</span>)}</div></div>)}{!workflows.length && <p className="setup-empty">Hire employees, then create your first route.</p>}</div>{workAgents.length > 0 && <form className="compact-form" action={createWorkflow}><div className="field"><label>Workflow name</label><input name="name" required placeholder="Plan → Build → Review" maxLength={60}/></div><div className="workflow-builder">{workSteps.map((selected, index) => <div className="workflow-step-row" key={index}><b>{index + 1}</b><select value={selected} onChange={(event) => setWorkSteps((current) => current.map((value, item) => item === index ? event.target.value : value))} required><option value="">Choose employee…</option>{workAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.provider} · {agent.role}</option>)}</select>{workSteps.length > 1 && <button type="button" onClick={() => setWorkSteps((current) => current.filter((_, item) => item !== index))}><X size={14}/></button>}</div>)}{workSteps.length < 4 && <button type="button" className="add-step" onClick={() => setWorkSteps((current) => [...current, workAgents[0]?.id ?? ""])}><Plus size={13}/> ADD WORK STEP</button>}<div className="workflow-step-row review-row"><b>✓</b><select name="reviewer" defaultValue=""><option value="">No final review</option>{reviewers.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.provider}</option>)}</select></div></div><button className="pixel-button primary" disabled={busy}>SAVE WORKFLOW</button></form>}</section>
   </div>{error && <div className="form-error setup-error">⚠ {error}</div>}<footer className="session-note"><KeyRound size={14}/><span>API keys are encrypted with the server master key and never enter Technocore or browser storage.</span></footer></ModalFrame>;
+}
+
+function RunnerDialog({ workspace, runners, onClose, onChanged }: { workspace: string; runners: LocalRunner[]; onClose: () => void; onChanged: () => Promise<void> }) {
+  const [label, setLabel] = useState("My computer");
+  const [pairing, setPairing] = useState<{ code: string; expiresAt: number; label: string }>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState("");
+  const site = typeof window === "undefined" ? "https://technoqueue.fun" : window.location.origin;
+  const connectCommand = pairing ? `pnpm runner connect --site ${site} --code ${pairing.code}` : "";
+
+  async function createPairing() {
+    setBusy(true); setError(""); setPairing(undefined);
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/runners`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label }) });
+      const body = await response.json() as { pairing?: { code: string; expiresAt: number; label: string }; error?: string };
+      if (!response.ok || !body.pairing) throw new Error(body.error ?? "Pairing code could not be created");
+      setPairing(body.pairing);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Pairing failed"); }
+    finally { setBusy(false); }
+  }
+
+  async function copy(value: string, name: string) {
+    try { await navigator.clipboard.writeText(value); setCopied(name); window.setTimeout(() => setCopied(""), 1500); }
+    catch { setError("Clipboard access was blocked. Select and copy the command manually."); }
+  }
+
+  async function revoke(runner: LocalRunner) {
+    if (!window.confirm(`Disconnect ${runner.label}?\n\nIts saved token will stop working immediately. Run \"pnpm runner forget\" on that computer before pairing it again.`)) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/runners`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ runnerId: runner.id }) });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Runner could not be disconnected");
+      await onChanged();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Disconnect failed"); }
+    finally { setBusy(false); }
+  }
+
+  return <ModalFrame kicker="LOCAL WORKFORCE · V0.3" title="Runner bridge" onClose={onClose} wide><div className="runner-console">
+    <section className="runner-intro"><div className="runner-terminal-art"><i/><i/><i/><span>HQ</span></div><div><strong>BRING YOUR COMPUTER INTO THE OFFICE</strong><p>A runner is a small local bridge with its own DID. This release proves identity and presence only—local project access and command execution remain disabled.</p><span className="runner-security"><ShieldAlert size={13}/> ONE-TIME CODE · SIGNED HEARTBEATS · REVOCABLE TOKEN</span></div></section>
+    <div className="runner-columns"><section><header><MonitorUp size={16}/><div><strong>PAIRED COMPUTERS</strong><span>{runners.length}/5 runner slots used</span></div></header><div className="runner-list">{runners.map((runner) => <article className={`runner-card state-${runner.state}`} key={runner.id}><i/><div><strong>{runner.label}</strong><span>{runner.platform} · v{runner.version}</span><code>{shortDid(runner.did)}</code></div><b>{runner.state.toUpperCase()}</b><button type="button" onClick={() => void revoke(runner)} disabled={busy} aria-label={`Disconnect ${runner.label}`}><Unplug size={14}/></button></article>)}{!runners.length && <p className="setup-empty">No local runner paired yet.</p>}</div></section>
+      <section><header><KeyRound size={16}/><div><strong>PAIR A RUNNER</strong><span>Code expires after 10 minutes</span></div></header>{pairing ? <div className="pairing-ticket"><span>ONE-TIME PAIRING CODE</span><strong>{pairing.code}</strong><small>Expires {new Date(pairing.expiresAt).toLocaleTimeString()}</small><div className="runner-command"><code>{connectCommand}</code><button type="button" onClick={() => void copy(connectCommand, "connect")}><Copy size={13}/>{copied === "connect" ? "COPIED" : "COPY"}</button></div><div className="runner-command"><code>pnpm runner start</code><button type="button" onClick={() => void copy("pnpm runner start", "start")}><Copy size={13}/>{copied === "start" ? "COPIED" : "COPY"}</button></div><p>Run both commands from a TechnoQueue source checkout. The office will show ONLINE after the first signed heartbeat.</p></div> : <div className="runner-pair-form"><label>Computer label</label><input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={48}/><button className="pixel-button primary" type="button" disabled={busy || !label.trim() || runners.length >= 5} onClick={() => void createPairing()}><KeyRound size={13}/>{busy ? "CREATING…" : "CREATE PAIRING CODE"}</button><p>The code is shown once in this office. Only its hash is stored on the server.</p></div>}</section></div>
+    {error && <div className="form-error setup-error">⚠ {error}</div>}
+  </div><footer className="session-note"><ShieldAlert size={14}/><span>The runner identity and connection token stay in <code>~/.technoqueue/runner.json</code>. Never upload that file or paste it into a support message.</span></footer></ModalFrame>;
 }
 
 function HireEmployeeDialog({ workspace, providers, onNeedProvider, onClose, onCreated }: { workspace: string; providers: ProviderConnection[]; onNeedProvider: () => void; onClose: () => void; onCreated: () => Promise<void> }) {

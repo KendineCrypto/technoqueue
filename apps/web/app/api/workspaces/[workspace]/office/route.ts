@@ -2,6 +2,7 @@ import { workspaceSchema } from "@technoqueue/core";
 import { NextResponse } from "next/server";
 import { authErrorResponse, ownedWorkspace, requireUser } from "@/lib/auth";
 import { listHostedAgentRows, listProviderRows, publicProvider } from "@/lib/persistent-office";
+import { listWorkspaceRunners, publicRunner } from "@/lib/local-runner";
 import { IntegrityViolationError, integrityErrorResponse, verifiedRecords, workspaceIntegritySummary } from "@/lib/technocore-integrity";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export async function GET(_: Request, context: Context) {
       }),
       workflows: workflows.map(({ value }) => value).filter((workflow) => workflow.steps.every((step) => activeAgentIds.has(step.agent_id))),
       providers: providerRows.map(publicProvider),
+      runners: listWorkspaceRunners(owned.id).map(publicRunner),
       canManage: true,
       ownerDid: user.account_did,
       eventRoom: owned.event_room,

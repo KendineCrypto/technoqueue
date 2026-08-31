@@ -65,6 +65,34 @@ export type HostedAgentRow = {
   updated_at: string;
 };
 
+export type LocalRunnerRow = {
+  id: string;
+  workspace_id: string;
+  did: string;
+  label: string;
+  platform: "win32" | "darwin" | "linux";
+  version: string;
+  token_hash: string;
+  capabilities_json: string;
+  last_seen_at: number | null;
+  last_sequence: number;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RunnerPairingRow = {
+  id: string;
+  workspace_id: string;
+  created_by_user_id: string;
+  code_hash: string;
+  challenge: string;
+  label: string;
+  expires_at: number;
+  consumed_at: string | null;
+  created_at: string;
+};
+
 declare global {
   var __technoQueueDb: DatabaseSync | undefined;
   var __technoQueueDbSchemaVersion: number | undefined;
@@ -142,6 +170,34 @@ function openDatabase() {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS agents_workspace ON hosted_agents(workspace_id, archived_at);
+    CREATE TABLE IF NOT EXISTS local_runners (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      did TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      platform TEXT NOT NULL CHECK(platform IN ('win32', 'darwin', 'linux')),
+      version TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      capabilities_json TEXT NOT NULL DEFAULT '[]',
+      last_seen_at INTEGER,
+      last_sequence INTEGER NOT NULL DEFAULT 0,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS local_runners_workspace ON local_runners(workspace_id, revoked_at);
+    CREATE TABLE IF NOT EXISTS runner_pairings (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      created_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash TEXT NOT NULL UNIQUE,
+      challenge TEXT NOT NULL,
+      label TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS runner_pairings_workspace ON runner_pairings(workspace_id, expires_at);
     CREATE TABLE IF NOT EXISTS trusted_technocore_records (
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       record_key TEXT NOT NULL,
@@ -182,7 +238,7 @@ function openDatabase() {
 }
 
 function migrate(database: DatabaseSync) {
-  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 5) return;
+  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 6) return;
   try { database.exec("ALTER TABLE workspaces ADD COLUMN event_room TEXT"); } catch { /* migrated already */ }
   try { database.exec("ALTER TABLE workspaces ADD COLUMN room_owned_at TEXT"); } catch { /* migrated already */ }
   database.exec("UPDATE workspaces SET event_room = 'd-tq-' || slug WHERE event_room IS NULL OR event_room = ''");
@@ -220,7 +276,38 @@ function migrate(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS public_feed_pending ON public_feed_outbox(status, next_attempt_at, audit_id);
     INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (5, datetime('now'));
   `);
-  globalThis.__technoQueueDbSchemaVersion = 5;
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS local_runners (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      did TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      platform TEXT NOT NULL CHECK(platform IN ('win32', 'darwin', 'linux')),
+      version TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      capabilities_json TEXT NOT NULL DEFAULT '[]',
+      last_seen_at INTEGER,
+      last_sequence INTEGER NOT NULL DEFAULT 0,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS local_runners_workspace ON local_runners(workspace_id, revoked_at);
+    CREATE TABLE IF NOT EXISTS runner_pairings (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      created_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash TEXT NOT NULL UNIQUE,
+      challenge TEXT NOT NULL,
+      label TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS runner_pairings_workspace ON runner_pairings(workspace_id, expires_at);
+    INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (6, datetime('now'));
+  `);
+  globalThis.__technoQueueDbSchemaVersion = 6;
 }
 
 export function db() {

@@ -6,6 +6,7 @@ export * from "./integrity";
 export * from "./office";
 export * from "./office-registry";
 export * from "./queue";
+export * from "./runner";
 export * from "./task";
 export * from "./technocore-client";
 export * from "./technocore-errors";

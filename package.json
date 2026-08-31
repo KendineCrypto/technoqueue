@@ -1,6 +1,6 @@
 {
   "name": "technoqueue",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Agent work, coordinated through Technocore.",
   "license": "MIT",
@@ -19,8 +19,9 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @technoqueue/core test",
-    "agent": "pnpm --filter @technoqueue/agent start"
+    "test": "pnpm --filter @technoqueue/core test && pnpm --filter @technoqueue/web test:runner",
+    "agent": "pnpm --filter @technoqueue/agent start",
+    "runner": "pnpm --filter @technoqueue/runner start"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
