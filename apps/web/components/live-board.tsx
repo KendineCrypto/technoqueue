@@ -2,15 +2,18 @@
 
 import type { AgentEvent, AgentProfile, OfficeRole, ParsedEvent, ProviderKind, Task, TaskIntegrity, Workflow } from "@technoqueue/core";
 import { roleBlueprints } from "@technoqueue/core/role-blueprints";
-import { Activity, BookOpen, Bot, Check, Copy, KeyRound, LockKeyhole, MonitorUp, Plus, RefreshCw, Settings2, ShieldAlert, Trash2, Unplug, UserMinus, UserPlus, X } from "lucide-react";
+import { Activity, BookOpen, Bot, Check, Copy, FolderOpen, Gauge, KeyRound, LockKeyhole, MonitorUp, Play, Plus, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Trash2, Unplug, UserMinus, UserPlus, X, XCircle } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type TaskView = Task & { integrity: TaskIntegrity };
 type ProviderConnection = { id: string; provider: ProviderKind; label: string; maskedKey: string; createdAt: string };
-type OfficeAgent = AgentProfile & { sessionOwned: boolean; configured: boolean; connectionLabel?: string; connectionMaskedKey?: string; runningTaskId?: string; lastError?: string };
+type OfficeAgent = AgentProfile & { sessionOwned: boolean; configured: boolean; connectionLabel?: string; connectionMaskedKey?: string; runningTaskId?: string; lastError?: string; usageLimit?: { dailyRequestLimit: number | null; dailyTokenLimit: number | null } };
 type LocalRunner = { id: string; did: string; label: string; platform: "win32" | "darwin" | "linux"; version: string; capabilities: string[]; lastSeenAt: number | null; state: "paired" | "online" | "recent" | "offline"; createdAt: string };
+type LocalProject = { id: string; runnerId: string; label: string; rootFingerprint: string; permissions: Array<"read" | "write" | "verify">; state: "pending" | "approved" | "revoked"; requestedAt: string; approvedAt: string | null };
+type LocalJob = { id: string; projectId: string; runnerId: string; taskId?: string; agentId?: string; kind: "context" | "apply_changes" | "verify"; status: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "rejected" | "cancelled"; request?: { kind: string; summary?: string; changes?: Array<{ path: string; content: string }>; command?: string }; result?: string; resultSha256?: string; signed: boolean; requestedAt: string; completedAt?: string | null };
+type UsageDashboard = { period: string; totals: { requests: number; promptTokens: number; outputTokens: number; totalTokens: number }; agents: Array<{ agentId: string; requests: number; totalTokens: number; dailyRequestLimit: number | null; dailyTokenLimit: number | null }> };
 type AgentView = { did: string; label: string; role: string; lastSeen: string; state: "active" | "recent" | "offline"; profile?: OfficeAgent };
 type EmployeeMood = "working" | "reviewing" | "done" | "idle" | "offline";
 
@@ -102,6 +105,9 @@ export function LiveBoard({ workspace }: { workspace: string }) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [providers, setProviders] = useState<ProviderConnection[]>([]);
   const [runners, setRunners] = useState<LocalRunner[]>([]);
+  const [projects, setProjects] = useState<LocalProject[]>([]);
+  const [jobs, setJobs] = useState<LocalJob[]>([]);
+  const [usage, setUsage] = useState<UsageDashboard>({ period: "UTC_TODAY", totals: { requests: 0, promptTokens: 0, outputTokens: 0, totalTokens: 0 }, agents: [] });
   const [canManage, setCanManage] = useState(false);
   const [eventRoom, setEventRoom] = useState(`tq-${workspace}`);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -123,8 +129,8 @@ export function LiveBoard({ workspace }: { workspace: string }) {
       }
       const taskData = await taskRes.json() as { tasks: TaskView[]; updatedAt: string };
       const eventData = await eventRes.json() as { events: ParsedEvent[] };
-      const officeData = await officeRes.json() as { agents: OfficeAgent[]; workflows: Workflow[]; providers: ProviderConnection[]; runners?: LocalRunner[]; canManage?: boolean; eventRoom?: string; integrity?: { requiresConfirmation?: boolean } };
-      setTasks(taskData.tasks); setEvents(eventData.events); setOfficeAgents(officeData.agents); setWorkflows(officeData.workflows); setProviders(officeData.providers); setRunners(officeData.runners ?? []); setAgents(deriveAgents(eventData.events, officeData.agents));
+      const officeData = await officeRes.json() as { agents: OfficeAgent[]; workflows: Workflow[]; providers: ProviderConnection[]; runners?: LocalRunner[]; projects?: LocalProject[]; jobs?: LocalJob[]; usage?: UsageDashboard; canManage?: boolean; eventRoom?: string; integrity?: { requiresConfirmation?: boolean } };
+      setTasks(taskData.tasks); setEvents(eventData.events); setOfficeAgents(officeData.agents); setWorkflows(officeData.workflows); setProviders(officeData.providers); setRunners(officeData.runners ?? []); setProjects(officeData.projects ?? []); setJobs(officeData.jobs ?? []); if (officeData.usage) setUsage(officeData.usage); setAgents(deriveAgents(eventData.events, officeData.agents));
       setCanManage(Boolean(officeData.canManage));
       if (officeData.eventRoom) setEventRoom(officeData.eventRoom);
       setConfirmationRequired(Boolean(officeData.integrity?.requiresConfirmation));
@@ -208,6 +214,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
 
       <aside className="game-sidebar">
         <section className="hud-card stats-card"><header><span>TODAY AT HQ</span><span className="pixel-sun">☀</span></header><div className="stat-grid"><GameStat value={agents.filter((agent) => agent.state === "active").length} label="ONLINE" tone="mint"/><GameStat value={counts.open ?? 0} label="WAITING" tone="gold"/><GameStat value={counts.review ?? 0} label="REVIEW" tone="coral"/><GameStat value={counts.done ?? 0} label="DONE" tone="blue"/></div></section>
+        <section className="hud-card usage-card"><header><span>AI METER · UTC TODAY</span><Gauge size={13}/></header><div><strong>{usage.totals.totalTokens.toLocaleString()}</strong><span>TOKENS</span><b>{usage.totals.requests} REQUESTS</b></div><p>Provider-reported when available; otherwise estimated from text length. No price is guessed.</p></section>
         <section className="hud-card activity-card"><header><span>OFFICE LOG</span><span className="live-pip">● LIVE</span></header><div className="game-activity-list">{events.length ? [...events].reverse().slice(0, 9).map((item) => <a className="game-activity" key={item.message.seq} href={`https://technocore.chat/humans#r/${eventRoom}/${item.message.seq}`} target="_blank" rel="noreferrer"><time>{time(item.message.ts)}</time><div><p><strong>{item.event.label ?? (item.signed ? shortDid(item.message.from) : "Boss")}</strong> {eventLabels[item.event.type]} {item.event.task_id ? <b>{displayId(item.event.task_id)}</b> : ""}</p><span>{item.signed ? "✓ SIGNED EVENT" : "DASHBOARD EVENT"}</span></div></a>) : <div className="log-empty"><Activity size={22}/><span>No office activity yet.</span></div>}</div></section>
       </aside>
     </section>
@@ -218,7 +225,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
     </section>
 
     {dialog && canManage && (
-      <CreateTaskDialog workspace={workspace} workflows={workflows} onClose={() => setDialog(false)} onCreated={async () => { setDialog(false); await refresh(); }}/>
+      <CreateTaskDialog workspace={workspace} workflows={workflows} projects={projects.filter((project) => project.state === "approved" && project.permissions.includes("read") && project.permissions.includes("write"))} onClose={() => setDialog(false)} onCreated={async () => { setDialog(false); await refresh(); }}/>
     )}
     {setupOpen && (
       <OfficeSetupDialog workspace={workspace} providers={providers} agents={officeAgents} workflows={workflows} onClose={() => setSetupOpen(false)} onChanged={refresh}/>
@@ -227,7 +234,7 @@ export function LiveBoard({ workspace }: { workspace: string }) {
       <HireEmployeeDialog workspace={workspace} providers={providers} onNeedProvider={() => { setHireOpen(false); setSetupOpen(true); }} onClose={() => setHireOpen(false)} onCreated={async () => { setHireOpen(false); await refresh(); }}/>
     )}
     {runnerOpen && (
-      <RunnerDialog workspace={workspace} runners={runners} onClose={() => setRunnerOpen(false)} onChanged={refresh}/>
+      <RunnerDialog workspace={workspace} runners={runners} projects={projects} jobs={jobs} onClose={() => setRunnerOpen(false)} onChanged={refresh}/>
     )}
     {editingAgent && (
       <EmployeeSettingsDialog workspace={workspace} agent={editingAgent} providers={providers} onClose={() => setEditingAgent(undefined)} onSaved={async () => { setEditingAgent(undefined); await refresh(); }}/>
@@ -413,12 +420,13 @@ function OfficeSetupDialog({ workspace, providers, agents, workflows, onClose, o
   </div>{error && <div className="form-error setup-error">⚠ {error}</div>}<footer className="session-note"><KeyRound size={14}/><span>API keys are encrypted with the server master key and never enter Technocore or browser storage.</span></footer></ModalFrame>;
 }
 
-function RunnerDialog({ workspace, runners, onClose, onChanged }: { workspace: string; runners: LocalRunner[]; onClose: () => void; onChanged: () => Promise<void> }) {
+function RunnerDialog({ workspace, runners, projects, jobs, onClose, onChanged }: { workspace: string; runners: LocalRunner[]; projects: LocalProject[]; jobs: LocalJob[]; onClose: () => void; onChanged: () => Promise<void> }) {
   const [label, setLabel] = useState("My computer");
   const [pairing, setPairing] = useState<{ code: string; expiresAt: number; label: string }>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState("");
+  const [grantChoices, setGrantChoices] = useState<Record<string, Array<"read" | "write" | "verify">>>({});
   const site = typeof window === "undefined" ? "https://technoqueue.fun" : window.location.origin;
   const connectCommand = pairing ? `pnpm runner connect --site ${site} --code ${pairing.code}` : "";
 
@@ -450,10 +458,37 @@ function RunnerDialog({ workspace, runners, onClose, onChanged }: { workspace: s
     finally { setBusy(false); }
   }
 
-  return <ModalFrame kicker="LOCAL WORKFORCE · V0.3" title="Runner bridge" onClose={onClose} wide><div className="runner-console">
-    <section className="runner-intro"><div className="runner-terminal-art"><i/><i/><i/><span>HQ</span></div><div><strong>BRING YOUR COMPUTER INTO THE OFFICE</strong><p>A runner is a small local bridge with its own DID. This release proves identity and presence only—local project access and command execution remain disabled.</p><span className="runner-security"><ShieldAlert size={13}/> ONE-TIME CODE · SIGNED HEARTBEATS · REVOCABLE TOKEN</span></div></section>
+  async function updateProject(project: LocalProject, action: "approve" | "revoke") {
+    if (action === "revoke" && !window.confirm(`Revoke ${project.label}? Pending local jobs will be cancelled.`)) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/projects`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(action === "approve" ? { action, projectId: project.id, permissions: grantChoices[project.id] ?? ["read", "write", "verify"] } : { action, projectId: project.id }) });
+      const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Project grant could not be updated"); await onChanged();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Project grant failed"); } finally { setBusy(false); }
+  }
+
+  function toggleGrant(projectId: string, permission: "write" | "verify") {
+    setGrantChoices((current) => {
+      const selected = current[projectId] ?? ["read", "write", "verify"];
+      return { ...current, [projectId]: selected.includes(permission) ? selected.filter((value) => value !== permission) : [...selected, permission] };
+    });
+  }
+
+  async function updateJob(job: LocalJob, action: "approve" | "reject" | "retry") {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/jobs`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ jobId: job.id, action }) });
+      const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Local job could not be updated"); await onChanged();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Local job update failed"); } finally { setBusy(false); }
+  }
+
+  const actionableJobs = jobs.filter((job) => job.status === "awaiting_approval" || job.status === "failed" || job.status === "queued" || job.status === "running").slice(0, 12);
+  return <ModalFrame kicker="LOCAL WORKFORCE · V0.3.2" title="Runner bridge" onClose={onClose} wide><div className="runner-console">
+    <section className="runner-intro"><div className="runner-terminal-art"><i/><i/><i/><span>HQ</span></div><div><strong>BRING YOUR COMPUTER INTO THE OFFICE</strong><p>Project paths and files remain on your computer. The office sees only a label and fingerprint. Read access is grant-based; every file write and verification command still waits for boss approval.</p><span className="runner-security"><ShieldAlert size={13}/> LOCAL PATHS · EXPLICIT GRANTS · SIGNED JOB RECEIPTS</span></div></section>
     <div className="runner-columns"><section><header><MonitorUp size={16}/><div><strong>PAIRED COMPUTERS</strong><span>{runners.length}/5 runner slots used</span></div></header><div className="runner-list">{runners.map((runner) => <article className={`runner-card state-${runner.state}`} key={runner.id}><i/><div><strong>{runner.label}</strong><span>{runner.platform} · v{runner.version}</span><code>{shortDid(runner.did)}</code></div><b>{runner.state.toUpperCase()}</b><button type="button" onClick={() => void revoke(runner)} disabled={busy} aria-label={`Disconnect ${runner.label}`}><Unplug size={14}/></button></article>)}{!runners.length && <p className="setup-empty">No local runner paired yet.</p>}</div></section>
-      <section><header><KeyRound size={16}/><div><strong>PAIR A RUNNER</strong><span>Code expires after 10 minutes</span></div></header>{pairing ? <div className="pairing-ticket"><span>ONE-TIME PAIRING CODE</span><strong>{pairing.code}</strong><small>Expires {new Date(pairing.expiresAt).toLocaleTimeString()}</small><div className="runner-command"><code>{connectCommand}</code><button type="button" onClick={() => void copy(connectCommand, "connect")}><Copy size={13}/>{copied === "connect" ? "COPIED" : "COPY"}</button></div><div className="runner-command"><code>pnpm runner start</code><button type="button" onClick={() => void copy("pnpm runner start", "start")}><Copy size={13}/>{copied === "start" ? "COPIED" : "COPY"}</button></div><p>Run both commands from a TechnoQueue source checkout. The office will show ONLINE after the first signed heartbeat.</p></div> : <div className="runner-pair-form"><label>Computer label</label><input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={48}/><button className="pixel-button primary" type="button" disabled={busy || !label.trim() || runners.length >= 5} onClick={() => void createPairing()}><KeyRound size={13}/>{busy ? "CREATING…" : "CREATE PAIRING CODE"}</button><p>The code is shown once in this office. Only its hash is stored on the server.</p></div>}</section></div>
+      <section><header><KeyRound size={16}/><div><strong>PAIR A RUNNER</strong><span>Code expires after 10 minutes</span></div></header>{pairing ? <div className="pairing-ticket"><span>ONE-TIME PAIRING CODE</span><strong>{pairing.code}</strong><small>Expires {new Date(pairing.expiresAt).toLocaleTimeString()}</small><div className="runner-command"><code>{connectCommand}</code><button type="button" onClick={() => void copy(connectCommand, "connect")}><Copy size={13}/>{copied === "connect" ? "COPIED" : "COPY"}</button></div><div className="runner-command"><code>pnpm runner start</code><button type="button" onClick={() => void copy("pnpm runner start", "start")}><Copy size={13}/>{copied === "start" ? "COPIED" : "COPY"}</button></div><p>Then connect a folder with <code>pnpm runner project add --path &quot;C:\your\project&quot;</code>. The path is stored only on that computer.</p></div> : <div className="runner-pair-form"><label>Computer label</label><input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={48}/><button className="pixel-button primary" type="button" disabled={busy || !label.trim() || runners.length >= 5} onClick={() => void createPairing()}><KeyRound size={13}/>{busy ? "CREATING…" : "CREATE PAIRING CODE"}</button><p>The code is shown once in this office. Only its hash is stored on the server.</p></div>}</section></div>
+    <section className="project-cabinet"><header><FolderOpen size={16}/><div><strong>PROJECT CABINET</strong><span>{projects.length} local folders · paths never leave the runner</span></div></header><div>{projects.length ? projects.map((project) => { const choice = grantChoices[project.id] ?? ["read", "write", "verify"]; return <article className={`project-grant state-${project.state}`} key={project.id}><div><i/><strong>{project.label}</strong><code>{project.rootFingerprint.slice(0, 16)}…</code><span>{project.state === "approved" ? project.permissions.join(" · ").toUpperCase() : "WAITING FOR BOSS"}</span></div><div>{project.state === "pending" ? <><div className="grant-toggles"><button type="button" className="active" disabled>READ</button>{(["write", "verify"] as const).map((permission) => <button type="button" className={choice.includes(permission) ? "active" : ""} onClick={() => toggleGrant(project.id, permission)} key={permission}>{permission.toUpperCase()}</button>)}</div><button type="button" className="pixel-button mint" disabled={busy} onClick={() => void updateProject(project, "approve")}><ShieldCheck size={13}/> APPROVE GRANT</button></> : <button type="button" className="pixel-button danger" disabled={busy} onClick={() => void updateProject(project, "revoke")}>REVOKE</button>}</div></article>; }) : <div className="project-empty"><FolderOpen size={25}/><p>On the paired computer run:</p><code>pnpm runner project add --path &quot;C:\your\project&quot;</code></div>}</div></section>
+    <section className="approval-inbox"><header><ShieldCheck size={16}/><div><strong>BOSS APPROVAL INBOX</strong><span>File writes and project commands stop here first</span></div><b>{jobs.filter((job) => job.status === "awaiting_approval").length} WAITING</b></header><div>{actionableJobs.length ? actionableJobs.map((job) => <article className={`approval-job status-${job.status}`} key={job.id}><div className="job-stamp"><span>{job.kind.replace("_", " ").toUpperCase()}</span><b>{job.status.replace("_", " ").toUpperCase()}</b></div><div className="job-copy"><strong>{projects.find((project) => project.id === job.projectId)?.label ?? "Local project"}</strong><p>{job.request?.kind === "apply_changes" ? job.request.summary : job.request?.kind === "verify" ? `Run ${job.request.command}` : "Prepare a filtered project snapshot"}</p>{job.request?.changes && <><div className="job-files">{job.request.changes.map((change) => <code key={change.path}>{change.path}</code>)}</div><details className="change-review"><summary>REVIEW EXACT NEW FILE CONTENTS</summary>{job.request.changes.map((change) => <section key={change.path}><strong>{change.path}</strong><pre>{change.content}</pre></section>)}</details></>}<small>{job.signed ? "✓ SIGNED RUNNER RECEIPT" : job.taskId ? displayId(job.taskId) : "PROJECT SETUP"}</small></div><div className="job-actions">{job.status === "awaiting_approval" && <><button type="button" className="approve" disabled={busy} onClick={() => void updateJob(job, "approve")}><Play size={12}/> APPROVE</button><button type="button" className="reject" disabled={busy} onClick={() => void updateJob(job, "reject")}><XCircle size={12}/> REJECT</button></>}{job.status === "failed" && <button type="button" className="retry" disabled={busy} onClick={() => void updateJob(job, "retry")}><RefreshCw size={12}/> RETRY</button>}</div></article>) : <div className="project-empty"><ShieldCheck size={25}/><p>No local action is waiting for approval.</p></div>}</div></section>
     {error && <div className="form-error setup-error">⚠ {error}</div>}
   </div><footer className="session-note"><ShieldAlert size={14}/><span>The runner identity and connection token stay in <code>~/.technoqueue/runner.json</code>. Never upload that file or paste it into a support message.</span></footer></ModalFrame>;
 }
@@ -504,7 +539,7 @@ function HireEmployeeDialog({ workspace, providers, onNeedProvider, onClose, onC
       const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Hiring failed"); await onCreated();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Hiring failed"); } finally { setBusy(false); }
   }
-  return <ModalFrame kicker="HUMAN RESOURCES · V0.3.1" title="Hire an AI employee" onClose={onClose}>{!providers.length ? <div className="empty-hire"><KeyRound size={34}/><strong>Connect an AI provider first</strong><p>Your employee needs an API account to think and work.</p><button className="pixel-button mint" onClick={onNeedProvider}>OPEN OFFICE SETUP</button></div> : <form className="form" action={submit}>
+  return <ModalFrame kicker="HUMAN RESOURCES · V0.3.2" title="Hire an AI employee" onClose={onClose}>{!providers.length ? <div className="empty-hire"><KeyRound size={34}/><strong>Connect an AI provider first</strong><p>Your employee needs an API account to think and work.</p><button className="pixel-button mint" onClick={onNeedProvider}>OPEN OFFICE SETUP</button></div> : <form className="form" action={submit}>
     <div className="employee-preview"><PixelPerson variant={2}/><div><span>NEW EMPLOYEE</span><strong>{connection?.provider.toUpperCase()}</strong></div></div>
     <div className="field-row"><div className="field"><label>Name</label><input name="name" required maxLength={40} placeholder="Ada"/></div><div className="field"><label>Job</label><select value={role} onChange={(event) => setRole(event.target.value as OfficeRole)}>{roleOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></div></div>
     <RoleBlueprintCard role={role}/>
@@ -519,6 +554,8 @@ function EmployeeSettingsDialog({ workspace, agent, providers, onClose, onSaved 
   const matching = providers.filter((provider) => provider.provider === agent.provider);
   const [role, setRole] = useState<OfficeRole>(agent.role);
   const [constraints, setConstraints] = useState(agent.instructions);
+  const [dailyRequests, setDailyRequests] = useState(agent.usageLimit?.dailyRequestLimit?.toString() ?? "");
+  const [dailyTokens, setDailyTokens] = useState(agent.usageLimit?.dailyTokenLimit?.toString() ?? "");
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   async function submit(form: FormData) {
     setBusy(true); setError("");
@@ -526,7 +563,10 @@ function EmployeeSettingsDialog({ workspace, agent, providers, onClose, onSaved 
       const connectionId = String(form.get("connectionId") ?? "");
       const selected = providers.find((provider) => provider.id === connectionId);
       const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/employees/${encodeURIComponent(agent.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: form.get("name"), role, model: form.get("model"), instructions: constraints, paused: form.get("paused") === "on", ...(selected ? { connectionId, provider: selected.provider } : {}) }) });
-      const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Update failed"); await onSaved();
+      const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Update failed");
+      const usageResponse = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/usage`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ agentId: agent.id, dailyRequestLimit: dailyRequests ? Number(dailyRequests) : null, dailyTokenLimit: dailyTokens ? Number(dailyTokens) : null }) });
+      const usageBody = await usageResponse.json() as { error?: string }; if (!usageResponse.ok) throw new Error(usageBody.error ?? "Budget update failed");
+      await onSaved();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Update failed"); } finally { setBusy(false); }
   }
   async function fireEmployee() {
@@ -564,22 +604,24 @@ function EmployeeSettingsDialog({ workspace, agent, providers, onClose, onSaved 
     <div className="field"><label>Model</label><input name="model" defaultValue={agent.model} required maxLength={100}/></div>
     <div className="field"><label>Provider connection</label><select name="connectionId" defaultValue="" disabled={!agent.sessionOwned}><option value="">{currentConnection}</option>{matching.map((provider) => <option key={provider.id} value={provider.id}>{provider.label} · {provider.maskedKey}</option>)}</select></div>
     <CustomConstraintsEditor value={constraints} onChange={setConstraints}/>
+    <section className="employee-budget"><header><Gauge size={15}/><div><strong>DAILY AI BUDGET</strong><span>UTC RESET · PROVIDER REQUEST GUARD</span></div></header><div className="field-row"><div className="field"><label>Maximum requests · optional</label><input type="number" min="1" max="500" value={dailyRequests} onChange={(event) => setDailyRequests(event.target.value)} placeholder="No limit"/></div><div className="field"><label>Maximum tokens · optional</label><input type="number" min="1000" max="50000000" step="1000" value={dailyTokens} onChange={(event) => setDailyTokens(event.target.value)} placeholder="No limit"/></div></div><p>When either limit is reached, TechnoQueue stops before calling the provider. Currency cost is not guessed because model prices vary.</p></section>
     <label className="toggle"><input type="checkbox" name="paused" defaultChecked={agent.paused}/> Send this employee on a break</label>
     {!agent.sessionOwned && <div className="form-error">This is a public historical employee. Its private key is not owned by your account.</div>}{error && <div className="form-error">⚠ {error}</div>}
     <div className="form-actions"><button type="button" className="pixel-button danger" onClick={() => void fireEmployee()} disabled={busy}><UserMinus size={14}/> FIRE EMPLOYEE</button><button type="button" className="pixel-button" onClick={() => void backupIdentity()} disabled={busy || !agent.sessionOwned}><KeyRound size={14}/> BACK UP DID</button><button type="button" className="pixel-button" onClick={onClose}>CLOSE</button><button className="pixel-button primary" disabled={busy || !agent.sessionOwned}>{busy ? "SAVING…" : "SAVE EMPLOYEE"}</button></div>
   </form></ModalFrame>;
 }
 
-function CreateTaskDialog({ workspace, workflows, onClose, onCreated }: { workspace: string; workflows: Workflow[]; onClose: () => void; onCreated: () => Promise<void> }) {
+function CreateTaskDialog({ workspace, workflows, projects, onClose, onCreated }: { workspace: string; workflows: Workflow[]; projects: LocalProject[]; onClose: () => void; onCreated: () => Promise<void> }) {
   const [submitting, setSubmitting] = useState(false); const [error, setError] = useState("");
   async function submit(form: FormData) {
     setSubmitting(true); setError("");
     try {
       const workflowId = String(form.get("workflow_id") ?? "");
-      const payload = workflowId ? { title: form.get("title"), prompt: form.get("prompt"), workflow_id: workflowId } : { title: form.get("title"), prompt: form.get("prompt"), role: "general", requires_review: false, max_attempts: 3 };
+      const projectId = String(form.get("project_id") ?? "");
+      const payload = workflowId ? { title: form.get("title"), prompt: form.get("prompt"), workflow_id: workflowId, project_id: projectId || null } : { title: form.get("title"), prompt: form.get("prompt"), role: "general", requires_review: false, max_attempts: 3 };
       const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json() as { error?: string }; if (!response.ok) throw new Error(body.error ?? "Task creation failed"); await onCreated();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Task creation failed"); } finally { setSubmitting(false); }
   }
-  return <ModalFrame kicker="BOSS DESK" title="New task brief" onClose={onClose}><form className="form" action={submit}><div className="field"><label htmlFor="title">File title · 120 max</label><input id="title" name="title" maxLength={120} required placeholder="Build a launch plan"/></div><div className="field"><label htmlFor="prompt">Assignment · 2,500 max</label><textarea id="prompt" name="prompt" maxLength={2500} required placeholder="Tell the office exactly what outcome you need…"/></div>{workflows.length ? <div className="field"><label htmlFor="workflow_id">Paper route</label><select id="workflow_id" name="workflow_id" defaultValue={workflows[0]?.id}>{workflows.map((workflow) => <option value={workflow.id} key={workflow.id}>{workflow.name} · {workflow.steps.length} desks</option>)}</select><div className="selected-route">{workflows[0]?.steps.map((step, index) => <span key={`${step.agent_id}-${index}`}>{step.label}{index < workflows[0]!.steps.length - 1 && <b>→</b>}</span>)}</div></div> : <div className="form-error"><strong>No workflow exists yet.</strong> Create a paper route in Office Setup before sending the task.</div>}{error && <div className="form-error">⚠ {error}</div>}<div className="form-actions"><button type="button" className="pixel-button" onClick={onClose}>CANCEL</button><button className="pixel-button primary" disabled={submitting || !workflows.length}>{submitting ? <><RefreshCw size={13}/> WRITING…</> : "SEND THE PAPER"}</button></div></form></ModalFrame>;
+  return <ModalFrame kicker="BOSS DESK" title="New task brief" onClose={onClose}><form className="form" action={submit}><div className="field"><label htmlFor="title">File title · 120 max</label><input id="title" name="title" maxLength={120} required placeholder="Build a launch plan"/></div><div className="field"><label htmlFor="prompt">Assignment · 2,500 max</label><textarea id="prompt" name="prompt" maxLength={2500} required placeholder="Tell the office exactly what outcome you need…"/></div>{workflows.length ? <><div className="field"><label htmlFor="workflow_id">Paper route</label><select id="workflow_id" name="workflow_id" defaultValue={workflows[0]?.id}>{workflows.map((workflow) => <option value={workflow.id} key={workflow.id}>{workflow.name} · {workflow.steps.length} desks</option>)}</select><div className="selected-route">{workflows[0]?.steps.map((step, index) => <span key={`${step.agent_id}-${index}`}>{step.label}{index < workflows[0]!.steps.length - 1 && <b>→</b>}</span>)}</div></div><div className="field"><label htmlFor="project_id">Local project · optional</label><select id="project_id" name="project_id" defaultValue=""><option value="">Text-only task · no local files</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.label} · {project.permissions.join(" + ")}</option>)}</select><small className="field-note">A Developer step may propose file changes. Every write and verification command still requires your approval.</small></div></> : <div className="form-error"><strong>No workflow exists yet.</strong> Create a paper route in Office Setup before sending the task.</div>}{error && <div className="form-error">⚠ {error}</div>}<div className="form-actions"><button type="button" className="pixel-button" onClick={onClose}>CANCEL</button><button className="pixel-button primary" disabled={submitting || !workflows.length}>{submitting ? <><RefreshCw size={13}/> WRITING…</> : "SEND THE PAPER"}</button></div></form></ModalFrame>;
 }

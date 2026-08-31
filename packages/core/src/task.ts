@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { sha256 } from "./hash";
 import { agentIdSchema, officeRoleSchema, workflowIdSchema, type AgentProfile, type Workflow } from "./office";
+import { runnerProjectIdSchema } from "./runner";
 import { didSchema, taskIdSchema } from "./validation";
 
 export const roles = ["general", "planner", "researcher", "writer", "coder", "analyst"] as const;
@@ -51,6 +52,7 @@ export const taskSchema = z.object({
   review_decision: z.enum(["approved", "changes_requested"]).nullable(),
   review_feedback: z.string().max(1000).nullable(),
   previous_result: z.string().max(3500).nullable().optional(),
+  project_id: runnerProjectIdSchema.nullable().optional(),
   office: officeTaskSchema.optional()
 }).strict();
 
@@ -60,7 +62,8 @@ export type TaskRole = Task["role"];
 export const createOfficeTaskInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(2500),
-  workflow_id: workflowIdSchema
+  workflow_id: workflowIdSchema,
+  project_id: runnerProjectIdSchema.nullable().optional()
 });
 
 export type CreateOfficeTaskInput = z.infer<typeof createOfficeTaskInputSchema>;
@@ -71,7 +74,7 @@ export const createTaskInputSchema = z.object({
   role: z.enum(roles),
   requires_review: z.boolean(),
   max_attempts: z.number().int().min(1).max(10).default(3)
-});
+}).extend({ project_id: runnerProjectIdSchema.nullable().optional() });
 
 export type CreateTaskInput = z.input<typeof createTaskInputSchema>;
 
@@ -111,7 +114,7 @@ export function createOfficeTask(input: CreateOfficeTaskInput, workflow: Workflo
   });
   const first = steps[0];
   if (!first || first.kind !== "work" || first.role === "reviewer") throw new Error("Workflow must begin with a working employee");
-  const task = createTask({ title: parsed.title, prompt: parsed.prompt, role: first.role, requires_review: steps.at(-1)?.kind === "review", max_attempts: 10 }, now);
+  const task = createTask({ title: parsed.title, prompt: parsed.prompt, role: first.role, requires_review: steps.at(-1)?.kind === "review", max_attempts: 10, project_id: parsed.project_id ?? null }, now);
   return taskSchema.parse({ ...task, office: { workflow_id: workflow.id, workflow_name: workflow.name, current_step: 0, steps } });
 }
 

@@ -93,6 +93,53 @@ export type RunnerPairingRow = {
   created_at: string;
 };
 
+export type RunnerProjectRow = {
+  id: string;
+  workspace_id: string;
+  runner_id: string;
+  label: string;
+  root_fingerprint: string;
+  permissions_json: string;
+  requested_at: string;
+  approved_at: string | null;
+  revoked_at: string | null;
+  updated_at: string;
+};
+
+export type RunnerJobRow = {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  runner_id: string;
+  task_id: string | null;
+  agent_id: string | null;
+  kind: "context" | "apply_changes" | "verify";
+  status: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "rejected" | "cancelled";
+  request_json: string;
+  result_text: string | null;
+  result_sha256: string | null;
+  receipt_signature: string | null;
+  requested_at: string;
+  approved_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
+export type ProviderUsageRow = {
+  id: string;
+  workspace_id: string;
+  agent_id: string;
+  task_id: string;
+  provider: string;
+  model: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_usd_micros: number | null;
+  created_at: string;
+};
+
 declare global {
   var __technoQueueDb: DatabaseSync | undefined;
   var __technoQueueDbSchemaVersion: number | undefined;
@@ -238,7 +285,7 @@ function openDatabase() {
 }
 
 function migrate(database: DatabaseSync) {
-  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 6) return;
+  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 8) return;
   try { database.exec("ALTER TABLE workspaces ADD COLUMN event_room TEXT"); } catch { /* migrated already */ }
   try { database.exec("ALTER TABLE workspaces ADD COLUMN room_owned_at TEXT"); } catch { /* migrated already */ }
   database.exec("UPDATE workspaces SET event_room = 'd-tq-' || slug WHERE event_room IS NULL OR event_room = ''");
@@ -307,7 +354,72 @@ function migrate(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS runner_pairings_workspace ON runner_pairings(workspace_id, expires_at);
     INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (6, datetime('now'));
   `);
-  globalThis.__technoQueueDbSchemaVersion = 6;
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS runner_projects (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      runner_id TEXT NOT NULL REFERENCES local_runners(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      root_fingerprint TEXT NOT NULL,
+      permissions_json TEXT NOT NULL DEFAULT '[]',
+      requested_at TEXT NOT NULL,
+      approved_at TEXT,
+      revoked_at TEXT,
+      updated_at TEXT NOT NULL,
+      UNIQUE(runner_id, root_fingerprint)
+    );
+    CREATE INDEX IF NOT EXISTS runner_projects_workspace ON runner_projects(workspace_id, revoked_at, requested_at DESC);
+    CREATE TABLE IF NOT EXISTS runner_jobs (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES runner_projects(id) ON DELETE CASCADE,
+      runner_id TEXT NOT NULL REFERENCES local_runners(id) ON DELETE CASCADE,
+      task_id TEXT,
+      agent_id TEXT,
+      kind TEXT NOT NULL CHECK(kind IN ('context', 'apply_changes', 'verify')),
+      status TEXT NOT NULL CHECK(status IN ('awaiting_approval', 'queued', 'running', 'succeeded', 'failed', 'rejected', 'cancelled')),
+      request_json TEXT NOT NULL,
+      result_text TEXT,
+      result_sha256 TEXT,
+      receipt_signature TEXT,
+      requested_at TEXT NOT NULL,
+      approved_at TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS runner_jobs_workspace ON runner_jobs(workspace_id, status, requested_at DESC);
+    CREATE INDEX IF NOT EXISTS runner_jobs_runner ON runner_jobs(runner_id, status, requested_at);
+    CREATE INDEX IF NOT EXISTS runner_jobs_task ON runner_jobs(workspace_id, task_id, agent_id, requested_at);
+    INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (7, datetime('now'));
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS provider_usage (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      estimated_usd_micros INTEGER,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS provider_usage_workspace ON provider_usage(workspace_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS provider_usage_agent ON provider_usage(workspace_id, agent_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS agent_usage_limits (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL,
+      daily_request_limit INTEGER,
+      daily_token_limit INTEGER,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, agent_id)
+    );
+    INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (8, datetime('now'));
+  `);
+  globalThis.__technoQueueDbSchemaVersion = 8;
 }
 
 export function db() {

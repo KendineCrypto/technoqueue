@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, ownedWorkspace, requireUser } from "@/lib/auth";
 import { listHostedAgentRows, listProviderRows, publicProvider } from "@/lib/persistent-office";
 import { listWorkspaceRunners, publicRunner } from "@/lib/local-runner";
+import { listJobs, listProjects, publicJob, publicProject } from "@/lib/local-projects";
+import { agentUsageLimit, workspaceUsage } from "@/lib/usage-ledger";
 import { IntegrityViolationError, integrityErrorResponse, verifiedRecords, workspaceIntegritySummary } from "@/lib/technocore-integrity";
 
 export const dynamic = "force-dynamic";
@@ -24,11 +26,14 @@ export async function GET(_: Request, context: Context) {
       agents: activeAgents.map(({ value }) => {
         const hosted = hostedMap.get(value.id);
         const connection = hosted ? providerMap.get(hosted.connection_id) : undefined;
-        return { ...value, sessionOwned: Boolean(hosted), configured: Boolean(connection), connectionLabel: connection?.label, connectionMaskedKey: connection ? publicProvider(connection).maskedKey : undefined, runningTaskId: hosted?.running_task_id ?? undefined, lastError: hosted?.last_error ?? undefined };
+        return { ...value, sessionOwned: Boolean(hosted), configured: Boolean(connection), connectionLabel: connection?.label, connectionMaskedKey: connection ? publicProvider(connection).maskedKey : undefined, runningTaskId: hosted?.running_task_id ?? undefined, lastError: hosted?.last_error ?? undefined, usageLimit: agentUsageLimit(owned.id, value.id) };
       }),
       workflows: workflows.map(({ value }) => value).filter((workflow) => workflow.steps.every((step) => activeAgentIds.has(step.agent_id))),
       providers: providerRows.map(publicProvider),
       runners: listWorkspaceRunners(owned.id).map(publicRunner),
+      projects: listProjects(owned.id).map(publicProject),
+      jobs: listJobs(owned.id).map(publicJob),
+      usage: workspaceUsage(owned.id),
       canManage: true,
       ownerDid: user.account_did,
       eventRoom: owned.event_room,

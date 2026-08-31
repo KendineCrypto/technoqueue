@@ -1,7 +1,7 @@
 import { analyzeIntegrity, createOfficeTaskInputSchema, createTaskInputSchema, serializeTask, workspaceSchema, type AgentProfile, type Task, type Workflow } from "@technoqueue/core";
 import { NextResponse } from "next/server";
 import { assertSameOrigin, authErrorResponse, ownedWorkspace, requireUser } from "@/lib/auth";
-import { one, type UserRow, writeAudit } from "@/lib/db";
+import { one, type RunnerProjectRow, type UserRow, writeAudit } from "@/lib/db";
 import { queueForSlug } from "@/lib/workspace-technocore";
 import { decryptIdentity } from "@/lib/secure-vault";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -50,6 +50,7 @@ export async function POST(request: Request, context: Context) {
       trustedWorkflow = workflows.find(({ value }) => value.id === officeInput.data.workflow_id)?.value;
       trustedAgents = new Map(agents.map(({ value }) => [value.id, value]));
       if (!trustedWorkflow) return NextResponse.json({ error: "The selected workflow is not trusted by this office" }, { status: 409 });
+      if (officeInput.data.project_id && !one<RunnerProjectRow>("SELECT * FROM runner_projects WHERE id = ? AND workspace_id = ? AND approved_at IS NOT NULL AND revoked_at IS NULL", officeInput.data.project_id, owned.id)) return NextResponse.json({ error: "The selected local project is not approved for this office" }, { status: 409 });
     }
     const task = officeInput.success && trustedWorkflow
       ? await queue.createOfficeFromTrustedRecords(officeInput.data, trustedWorkflow, [...trustedAgents.values()])

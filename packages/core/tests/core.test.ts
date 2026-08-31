@@ -27,6 +27,7 @@ import {
   prepareTaskForStorage,
   requestChanges,
   runnerHeartbeatPayload,
+  runnerJobRequestSchema,
   runnerPairingPayload,
   finishOfficeReview,
   loadIdentity,
@@ -134,6 +135,11 @@ describe("local runner protocol", () => {
     expect(heartbeat.indexOf("heartbeat-v1")).toBeLessThan(heartbeat.indexOf("identity-v1"));
     const signature = signPayload(identity, heartbeat);
     expect(verifyDidSignature(identity.did, heartbeat, signature)).toBe(true);
+  });
+  it("rejects project writes that escape the granted root", () => {
+    expect(runnerJobRequestSchema.safeParse({ kind: "apply_changes", summary: "change", changes: [{ path: "../secrets.txt", content: "x" }] }).success).toBe(false);
+    expect(runnerJobRequestSchema.safeParse({ kind: "apply_changes", summary: "change", changes: [{ path: "C:\\Users\\secret.txt", content: "x" }] }).success).toBe(false);
+    expect(runnerJobRequestSchema.safeParse({ kind: "apply_changes", summary: "change", changes: [{ path: "src/index.ts", content: "export {};" }] }).success).toBe(true);
   });
 });
 

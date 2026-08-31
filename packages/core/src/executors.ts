@@ -58,6 +58,11 @@ export function createExecutor(provider: "mock" | "openai", label: string, model
 }
 
 export type HostedExecutionInput = { system: string; prompt: string; maxOutputTokens?: number };
+export type HostedExecutionResult = { text: string; usage: { promptTokens: number; outputTokens: number; totalTokens: number } };
+
+function usage(promptTokens = 0, outputTokens = 0, totalTokens = promptTokens + outputTokens) {
+  return { promptTokens, outputTokens, totalTokens };
+}
 
 function apiError(provider: string, response: Response, body: string) {
   const compact = body.replace(/\s+/g, " ").slice(0, 280);
@@ -70,6 +75,10 @@ export class HostedProviderExecutor {
   }
 
   async generate(input: HostedExecutionInput): Promise<string> {
+    return (await this.generateWithUsage(input)).text;
+  }
+
+  async generateWithUsage(input: HostedExecutionInput): Promise<HostedExecutionResult> {
     if (this.provider === "openai") return this.openai(input);
     if (this.provider === "anthropic") return this.anthropic(input);
     if (this.provider === "deepseek") return this.deepseek(input);
@@ -107,7 +116,7 @@ export class HostedProviderExecutor {
       max_output_tokens: input.maxOutputTokens ?? 1800
     });
     if (!response.output_text.trim()) throw new Error("OpenAI returned no text output");
-    return response.output_text;
+    return { text: response.output_text, usage: usage(response.usage?.input_tokens, response.usage?.output_tokens, response.usage?.total_tokens) };
   }
 
   private async anthropic(input: HostedExecutionInput) {
@@ -118,10 +127,10 @@ export class HostedProviderExecutor {
     });
     const raw = await response.text();
     if (!response.ok) throw apiError("Anthropic", response, raw);
-    const body = JSON.parse(raw) as { content?: Array<{ type?: string; text?: string }> };
+    const body = JSON.parse(raw) as { content?: Array<{ type?: string; text?: string }>; usage?: { input_tokens?: number; output_tokens?: number } };
     const text = body.content?.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim();
     if (!text) throw new Error("Anthropic returned no text output");
-    return text;
+    return { text, usage: usage(body.usage?.input_tokens, body.usage?.output_tokens) };
   }
 
   private async deepseek(input: HostedExecutionInput) {
@@ -132,10 +141,10 @@ export class HostedProviderExecutor {
     });
     const raw = await response.text();
     if (!response.ok) throw apiError("DeepSeek", response, raw);
-    const body = JSON.parse(raw) as { choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }> };
+    const body = JSON.parse(raw) as { choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
     const text = body.choices?.[0]?.message?.content?.trim();
     if (!text) throw new Error(`DeepSeek returned no final text${body.choices?.[0]?.finish_reason ? ` (${body.choices[0].finish_reason})` : ""}`);
-    return text;
+    return { text, usage: usage(body.usage?.prompt_tokens, body.usage?.completion_tokens, body.usage?.total_tokens) };
   }
 
   private async gemini(input: HostedExecutionInput) {
@@ -146,10 +155,11 @@ export class HostedProviderExecutor {
     });
     const raw = await response.text();
     if (!response.ok) throw apiError("Gemini", response, raw);
-    const body = JSON.parse(raw) as { output_text?: string; status?: string; error?: { message?: string }; steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
+    const body = JSON.parse(raw) as { output_text?: string; status?: string; error?: { message?: string }; steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>; usage_metadata?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } };
     const lastOutput = body.steps?.filter((step) => step.type === "model_output").at(-1);
     const text = body.output_text?.trim() || lastOutput?.content?.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim();
     if (!text) throw new Error(`Gemini returned no text output${body.status ? ` (${body.status})` : ""}${body.error?.message ? `: ${body.error.message}` : ""}`);
-    return text;
+    const measured = body.usage_metadata ?? body.usage;
+    return { text, usage: usage(measured?.input_tokens, measured?.output_tokens, measured?.total_tokens) };
   }
 }

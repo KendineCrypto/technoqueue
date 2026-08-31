@@ -22,6 +22,8 @@ Hosted offices add a fail-closed state firewall for that threat. Every record cr
 
 Every Technocore value is validated and treated as untrusted task data. Hosted employees are text-only and receive no shell, filesystem, browser, email, wallet, payment, or arbitrary HTTP tools. Provider calls are restricted to the built-in provider adapters.
 
+The optional v0.3.2 local runner is a separate, explicit trust boundary. Local absolute paths stay in the runner config. A project needs an owner-approved grant, and every file write or verification command needs a separate owner approval. The runner validates relative paths, rejects symlink/protected paths, uses fixed command presets without a shell, caps output and time, and signs each receipt. This is not a complete sandbox: an approved package script is project-controlled code and can do anything the operating-system user can do. Run the bridge under a low-privilege account, keep projects in version control, inspect every proposal, and never approve an unfamiliar command.
+
 A leaked `/board/{workspace}` or `/task/{workspace}/{task}` URL does not grant application access: reads require the workspace owner's authenticated session. The slug must still be treated as public because the associated Technocore namespace is public.
 
 On upgrade, existing offices do not execute automatically after their initial trust anchors are imported. The owner must review the displayed state and explicitly activate the integrity firewall. This is a migration acknowledgement, not proof that historical public KV was never modified.

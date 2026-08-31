@@ -12,6 +12,17 @@ TechnoQueue is independent open-source software. It is not affiliated with FLOP 
 
 The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
 
+## v0.3.2 pre-FLOP workforce foundation
+
+- A paired runner can request a grant for a local project folder. The absolute path stays only in `~/.technoqueue/runner.json`; the server receives a label and DID-bound SHA-256 fingerprint.
+- Office owners approve project permissions and explicitly approve every proposed file write and verification command in a pixel-art **Boss Approval Inbox**.
+- Developer steps can use a filtered project snapshot, propose complete UTF-8 file changes, wait for approval, apply them inside the granted root, and return DID-signed job receipts.
+- The runner blocks traversal, absolute paths, symlink writes, `.env`, credentials, private-key-like names, generated directories, and oversized context. File changes use temporary files with best-effort rollback.
+- Provider token usage is recorded per employee and task. Owners can set daily request and token limits; the scheduler stops before the provider call when a limit is reached.
+- TechnoQueue does not guess currency cost. Prices vary by provider, model, cache, and account; future FLOP accounting will use the testnet's actual settlement data.
+
+Read [Local runner security](docs/local-runner.md) before granting a project. Verification runs project-controlled package scripts and therefore requires the same care as running them manually.
+
 ## v0.3.1 role blueprints
 
 - Every generalist, planner, researcher, writer, developer, analyst, and reviewer now receives a detailed built-in role blueprint on every provider request.
@@ -92,17 +103,20 @@ Open `http://localhost:3000`, create an account, then:
 6. Create a workflow in **Office Setup**.
 7. Send a brief from **New Task**.
 
-### Pair a local runner (developer preview)
+### Pair a local runner and connect a project
 
-The runner is optional in v0.3.0; hosted BYOK employees continue to work without it.
+The runner is optional; hosted text-only BYOK employees continue to work without it.
 
 1. Open your office and click **Runner**.
 2. Enter a computer label and create a one-time pairing code.
 3. In a TechnoQueue source checkout on that computer, run the command shown in the panel.
-4. Start presence heartbeats with `pnpm runner start`.
-5. Return to the office. The Runner button turns green after the first signed heartbeat.
+4. Add a local folder with `pnpm runner project add --path "C:\path\to\project"`.
+5. Return to the office, open **Runner**, review the fingerprint, and grant the required permissions.
+6. Start the bridge with `pnpm runner start` and keep that terminal open.
+7. Choose the approved project when creating a task whose route contains a Developer.
+8. Approve or reject each write and verification job from the **Boss Approval Inbox**.
 
-Use `pnpm runner status` to inspect the connection. To disconnect it, first use the unplug button in the office, then run `pnpm runner forget` on that computer. Revocation takes effect immediately; deleting only the local file does not revoke the server token.
+Use `pnpm runner status` to inspect the connection and `pnpm runner project list` to inspect the private local mappings. To disconnect it, first use the unplug button in the office, then run `pnpm runner forget` on that computer. Revocation takes effect immediately; deleting only the local file does not revoke the server token.
 
 The server scheduler keeps working after the browser tab closes. Click an employee to pause, change provider/model, retry an error, back up its DID, or fire it.
 
