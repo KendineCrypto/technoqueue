@@ -79,7 +79,7 @@ export function listUserWorkspaces(userId: string) {
 
 export function assertSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  if (!origin) return;
+  if (!origin) throw new AuthError("Missing Origin header", 403);
   const trustedOrigins = new Set([new URL(request.url).origin]);
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
   if (configuredSiteUrl) {

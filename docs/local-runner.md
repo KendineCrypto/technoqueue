@@ -1,6 +1,6 @@
 # Local runner security
 
-TechnoQueue v0.3.2 adds a deliberately narrow local execution bridge. It can prepare a filtered project snapshot, apply an exact owner-approved set of UTF-8 file contents, and run one of four owner-approved verification presets. It does not receive provider keys, expose a general shell API, deploy, push Git commits, delete files, spend funds, or grant itself access.
+TechnoQueue v0.3.3 provides a deliberately narrow local execution bridge. It can prepare a filtered project snapshot, apply an exact owner-approved set of UTF-8 file contents, and run one of four owner-approved verification presets. It does not receive provider keys, expose a general shell API, deploy, push Git commits, delete files, spend funds, or grant itself access.
 
 ## Pairing and identity
 
@@ -18,7 +18,7 @@ Run:
 pnpm runner project add --path "C:\path\to\project" --label "My app"
 ```
 
-The canonical absolute path remains only in `~/.technoqueue/runner.json`. The server receives the label and a SHA-256 fingerprint domain-separated with the runner DID. The office owner must approve the project before a job can read it. Revoking the grant cancels queued jobs.
+The canonical absolute path remains only in `~/.technoqueue/runner.json`. The server receives the label and a SHA-256 fingerprint domain-separated with the runner DID. The office shows the full fingerprint for verification and copying. The owner must approve the project before a job can read it. Revoking the grant cancels queued and running jobs; a warning remains when local changes may already have happened.
 
 Permissions are independent:
 
@@ -28,13 +28,13 @@ Permissions are independent:
 
 ## Execution boundary
 
-Context collection skips symlinks, `.git`, dependency/build/cache directories, `.env*`, credentials, private-key-like filenames, unsupported extensions, large files, and configured byte/file limits. This filtering reduces accidental disclosure but is not a data-loss-prevention guarantee. Review the project before connecting it. The private snapshot is stored in the application database and supplied to the employee's configured AI provider for a Developer task; it is not written into the public Technocore task record.
+Context collection skips symlinks, `.git`, dependency/build/cache directories, `.env*`, credentials, secret/private-key/service-account-like filenames, unsupported extensions, large files, and configured byte/file limits. This filtering reduces accidental disclosure but is not a data-loss-prevention guarantee. Review the project before connecting it. The private snapshot is encrypted with the server master key while it is needed, never returned by the browser API, supplied to the employee's configured AI provider for a Developer task, and purged after the file proposal is created. Unconsumed snapshots expire after 24 hours by default (`TECHNOQUEUE_RUNNER_SNAPSHOT_TTL_HOURS`). It is not written into the public Technocore task record.
 
-File proposals are parsed against a strict schema. The runner rejects absolute paths, traversal, protected names, parent directories resolving outside the grant, and symlink targets. It never deletes a project file. Proposed contents are written to exclusive temporary files first, then renamed into place; an error triggers best-effort restoration of already changed files.
+File proposals are parsed against a strict schema. The runner rejects absolute paths, traversal, Windows device names and alternate data streams, ambiguous trailing dots/spaces, protected or generated paths, parent directories resolving outside the grant, and symlink targets. It never deletes a project file. Proposed contents are written to exclusive temporary files first, then renamed into place; an error triggers best-effort restoration of already changed files. The signed receipt hashes the final bytes read back from disk.
 
-Verification has no arbitrary command string. Current presets are `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `npm test`. They run without a shell, with a reduced environment, a 120-second timeout, and capped output. **Package scripts are project code and can execute arbitrary behavior.** Approve a verification job only if you would run that script yourself.
+Verification has no arbitrary command string. Current presets are `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `npm test`. They use pinned package-manager JavaScript entrypoints without a shell on Windows and Unix, with a reduced environment, a 120-second timeout, and capped output. A non-zero exit fails the job and its output remains visible to the owner. **Package scripts are project code and can execute arbitrary behavior with the runner user's access, including inherited network and credentials.** Approve a verification job only if you would run that script yourself.
 
-Every completed job sends a result hash, timestamp, status, and DID signature. The server verifies the hash/signature and accepts the receipt only while the job is running; completed receipts cannot be replayed.
+Every approved request is bound to its exact SHA-256 digest. Every completed job sends a result hash, timestamp, status, and DID signature. Jobs carry an expiring lease; the server verifies the current permission, hash, signature, and lease before accepting a receipt. Late and replayed receipts are rejected.
 
 ## Local custody and revocation
 

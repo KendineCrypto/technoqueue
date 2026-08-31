@@ -14,7 +14,12 @@ export const runnerProjectPermissionSchema = z.enum(["read", "write", "verify"])
 export const runnerVerifyCommandSchema = z.enum(["pnpm-test", "pnpm-typecheck", "pnpm-lint", "npm-test"]);
 export const runnerRelativePathSchema = z.string().trim().min(1).max(240).refine((value) => {
   const normalized = value.replaceAll("\\", "/");
-  return !normalized.startsWith("/") && !/^[A-Za-z]:/.test(normalized) && !normalized.split("/").includes("..");
+  const parts = normalized.split("/");
+  const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+  return !normalized.startsWith("/")
+    && !/^[A-Za-z]:/.test(normalized)
+    && !normalized.includes(":")
+    && parts.every((part) => Boolean(part) && part !== "." && part !== ".." && !/[. ]$/.test(part) && !reserved.test(part));
 }, "Path must stay relative to the granted project");
 
 export const runnerPairRequestSchema = z.object({

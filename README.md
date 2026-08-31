@@ -12,6 +12,16 @@ TechnoQueue is independent open-source software. It is not affiliated with FLOP 
 
 The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
 
+## v0.3.3 runner security and reliability
+
+- Rate limiting now uses the proxy-observed client address rather than the attacker-controlled first forwarding value, and its in-memory bucket store is bounded.
+- Browser mutations fail closed when the `Origin` header is missing. Production responses include HSTS, and API responses are explicitly non-cacheable.
+- Every approved runner request is bound to its SHA-256 digest. Verification and dependency/CI changes require a prominent risk acknowledgement and show their exact contents or command.
+- Runner jobs have expiring leases. Late receipts, revoked permissions, and request mutations are rejected; completed and failed receipts remain visible in the approval inbox.
+- Filtered project snapshots are never returned to the browser, are encrypted at rest while needed, and are deleted as soon as the change proposal is created or after a 24-hour safety TTL.
+- Windows verification uses pinned pnpm/npm JavaScript entrypoints without a shell; non-zero process exits now fail the job. CI repeats the runner test on Windows.
+- Path checks reject Windows device names, alternate data streams, ambiguous trailing characters, generated/dependency directories, and more secret-like filenames. Receipts hash the bytes observed after the final write.
+
 ## v0.3.2 pre-FLOP workforce foundation
 
 - A paired runner can request a grant for a local project folder. The absolute path stays only in `~/.technoqueue/runner.json`; the server receives a label and DID-bound SHA-256 fingerprint.
@@ -215,7 +225,7 @@ docs           architecture and hosted product notes
 
 ## Trust and retention
 
-Technocore data is public, untrusted, and not durable storage. Never submit confidential or regulated content. Owned `d-` rooms protect who may append activity, but employee/workflow/task notes remain generic Technocore KV. An outside writer can still cause availability problems, but altered or injected records are quarantined and cannot trigger hosted provider spend. Missing old room evidence is shown as unavailable rather than invalid. For permanent evidence or private work, operate storage and access controls you own.
+Technocore data is public, untrusted, and not durable storage. Never submit confidential or regulated content. Owned `d-` rooms protect who may append activity, but employee/workflow/task notes remain generic Technocore KV. An outside writer can still cause availability problems, but altered or injected records are quarantined and cannot trigger hosted provider spend. Missing old room evidence is shown as unavailable rather than invalid. Local-runner source snapshots are private application data: they are filtered, encrypted while needed, sent to the Developer's selected provider, and purged after a change proposal is formed. For permanent evidence or private work, operate storage and access controls you own.
 
 ## License
 

@@ -119,6 +119,9 @@ export type RunnerJobRow = {
   result_text: string | null;
   result_sha256: string | null;
   receipt_signature: string | null;
+  approved_request_sha256: string | null;
+  lease_expires_at: string | null;
+  attempt_count: number;
   requested_at: string;
   approved_at: string | null;
   started_at: string | null;
@@ -285,7 +288,7 @@ function openDatabase() {
 }
 
 function migrate(database: DatabaseSync) {
-  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 8) return;
+  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 9) return;
   try { database.exec("ALTER TABLE workspaces ADD COLUMN event_room TEXT"); } catch { /* migrated already */ }
   try { database.exec("ALTER TABLE workspaces ADD COLUMN room_owned_at TEXT"); } catch { /* migrated already */ }
   database.exec("UPDATE workspaces SET event_room = 'd-tq-' || slug WHERE event_room IS NULL OR event_room = ''");
@@ -382,6 +385,9 @@ function migrate(database: DatabaseSync) {
       result_text TEXT,
       result_sha256 TEXT,
       receipt_signature TEXT,
+      approved_request_sha256 TEXT,
+      lease_expires_at TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
       requested_at TEXT NOT NULL,
       approved_at TEXT,
       started_at TEXT,
@@ -419,7 +425,11 @@ function migrate(database: DatabaseSync) {
     );
     INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (8, datetime('now'));
   `);
-  globalThis.__technoQueueDbSchemaVersion = 8;
+  try { database.exec("ALTER TABLE runner_jobs ADD COLUMN approved_request_sha256 TEXT"); } catch { /* migrated already */ }
+  try { database.exec("ALTER TABLE runner_jobs ADD COLUMN lease_expires_at TEXT"); } catch { /* migrated already */ }
+  try { database.exec("ALTER TABLE runner_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"); } catch { /* migrated already */ }
+  database.exec("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (9, datetime('now'))");
+  globalThis.__technoQueueDbSchemaVersion = 9;
 }
 
 export function db() {

@@ -1,6 +1,6 @@
 {
   "name": "@technoqueue/runner",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,8 @@
   "dependencies": {
     "@technoqueue/core": "workspace:*",
     "commander": "^14.0.0",
+    "npm": "11.6.0",
+    "pnpm": "11.5.0",
     "tsx": "^4.20.0",
     "zod": "^4.0.0"
   }

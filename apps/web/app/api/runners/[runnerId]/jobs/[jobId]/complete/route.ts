@@ -1,7 +1,9 @@
 import { runnerJobResultPayload, runnerJobResultSchema, sha256, verifyDidSignature } from "@technoqueue/core";
 import { NextResponse } from "next/server";
 import { authErrorResponse, AuthError } from "@/lib/auth";
-import { nowIso, one, run, writeAudit, type RunnerJobRow } from "@/lib/db";
+import { nowIso, one, run, writeAudit, type RunnerJobRow, type RunnerProjectRow } from "@/lib/db";
+import { projectHasPermission } from "@/lib/local-projects";
+import { protectRunnerJobResult } from "@/lib/job-results";
 import { requireRunner } from "@/lib/runner-auth";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +21,16 @@ export async function POST(request: Request, context: Context) {
     const job = one<RunnerJobRow>("SELECT * FROM runner_jobs WHERE id = ? AND runner_id = ?", jobId, runnerId);
     if (!job) throw new AuthError("Local job not found", 404);
     if (job.status !== "running") throw new AuthError("Local job is not running", 409);
-    const result = run("UPDATE runner_jobs SET status = ?, result_text = ?, result_sha256 = ?, receipt_signature = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'running'", input.status, input.result, input.resultSha256, input.signature, input.completedAt, nowIso(), jobId);
+    const timestamp = nowIso();
+    if (job.lease_expires_at && job.lease_expires_at <= timestamp) {
+      run("UPDATE runner_jobs SET status = 'failed', result_text = 'Runner lease expired before the receipt arrived.', completed_at = ?, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'running'", timestamp, timestamp, job.id);
+      throw new AuthError("Local job lease expired", 409);
+    }
+    const project = one<RunnerProjectRow>("SELECT * FROM runner_projects WHERE id = ? AND runner_id = ?", job.project_id, runnerId);
+    const required = job.kind === "apply_changes" ? "write" : job.kind === "verify" ? "verify" : "read";
+    if (!project || !projectHasPermission(project, required)) throw new AuthError("Project permission was revoked before completion", 409);
+    const storedResult = await protectRunnerJobResult(job.kind, input.result);
+    const result = run("UPDATE runner_jobs SET status = ?, result_text = ?, result_sha256 = ?, receipt_signature = ?, completed_at = ?, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'running'", input.status, storedResult, input.resultSha256, input.signature, input.completedAt, timestamp, jobId);
     if (Number(result.changes) !== 1) throw new AuthError("Local job changed before the result was stored", 409);
     writeAudit({ workspaceId: runner.workspace_id, action: input.status === "succeeded" ? "runner.job_succeeded" : "runner.job_failed", targetId: jobId, metadata: { runnerId, kind: job.kind, taskId: job.task_id, resultSha256: input.resultSha256 } });
     return NextResponse.json({ ok: true });

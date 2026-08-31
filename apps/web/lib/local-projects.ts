@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { runnerJobRequestSchema, type RunnerJobRequest } from "@technoqueue/core";
+import { runnerJobRequestSchema, sha256, type RunnerJobRequest } from "@technoqueue/core";
 import { all, db, nowIso, one, run, type RunnerJobRow, type RunnerProjectRow } from "@/lib/db";
 
 export type ProjectPermission = "read" | "write" | "verify";
@@ -33,7 +33,9 @@ export function publicJob(row: RunnerJobRow) {
     kind: row.kind,
     status: row.status,
     request,
-    result: row.result_text ?? undefined,
+    requestSha256: sha256(row.request_json),
+    highRisk: request ? highRiskJobRequest(request) : false,
+    result: row.kind === "context" ? undefined : row.result_text ?? undefined,
     resultSha256: row.result_sha256 ?? undefined,
     signed: Boolean(row.receipt_signature),
     requestedAt: row.requested_at,
@@ -43,12 +45,36 @@ export function publicJob(row: RunnerJobRow) {
   };
 }
 
+export function highRiskJobRequest(request: RunnerJobRequest) {
+  if (request.kind === "verify") return true;
+  if (request.kind !== "apply_changes") return false;
+  return request.changes.some(({ path }) => {
+    const normalized = path.replaceAll("\\", "/").toLowerCase(); const name = normalized.split("/").at(-1) ?? "";
+    return normalized.startsWith(".github/") || normalized.includes("/.github/") || name === "package.json" || /(^|[-.])(lock|lockfile)(\.|$)/.test(name) || name.endsWith("lock.yaml") || name.endsWith("lock.json");
+  });
+}
+
 export function listProjects(workspaceId: string) {
   return all<RunnerProjectRow>("SELECT * FROM runner_projects WHERE workspace_id = ? AND revoked_at IS NULL ORDER BY requested_at DESC", workspaceId);
 }
 
 export function listJobs(workspaceId: string, limit = 40) {
-  return all<RunnerJobRow>("SELECT * FROM runner_jobs WHERE workspace_id = ? ORDER BY requested_at DESC LIMIT ?", workspaceId, limit);
+  recoverExpiredRunnerJobs(workspaceId);
+  purgeExpiredRunnerSnapshots(workspaceId);
+  return all<RunnerJobRow>("SELECT * FROM runner_jobs WHERE workspace_id = ? ORDER BY CASE WHEN status IN ('awaiting_approval','queued','running','failed') THEN 0 ELSE 1 END, requested_at DESC LIMIT ?", workspaceId, limit);
+}
+
+function runnerLeaseSeconds() { const value = Number(process.env.TECHNOQUEUE_RUNNER_JOB_LEASE_SECONDS ?? 180); return Number.isFinite(value) ? Math.min(1_800, Math.max(30, value)) : 180; }
+function snapshotTtlHours() { const value = Number(process.env.TECHNOQUEUE_RUNNER_SNAPSHOT_TTL_HOURS ?? 24); return Number.isFinite(value) ? Math.min(168, Math.max(1, value)) : 24; }
+
+export function recoverExpiredRunnerJobs(workspaceId?: string) {
+  const timestamp = nowIso(); const scope = workspaceId ? "workspace_id = ? AND " : "";
+  run(`UPDATE runner_jobs SET status = 'failed', result_text = 'Runner lease expired before a signed receipt was received. Local changes may already exist; inspect the project before retrying.', completed_at = ?, lease_expires_at = NULL, updated_at = ? WHERE ${scope}status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`, timestamp, timestamp, ...(workspaceId ? [workspaceId] : []), timestamp);
+}
+
+export function purgeExpiredRunnerSnapshots(workspaceId?: string) {
+  const timestamp = nowIso(); const cutoff = new Date(Date.now() - snapshotTtlHours() * 3_600_000).toISOString(); const scope = workspaceId ? "workspace_id = ? AND " : "";
+  run(`UPDATE runner_jobs SET status = 'cancelled', result_text = NULL, completed_at = ?, updated_at = ? WHERE ${scope}kind = 'context' AND status = 'succeeded' AND result_text IS NOT NULL AND completed_at IS NOT NULL AND completed_at <= ?`, timestamp, timestamp, ...(workspaceId ? [workspaceId] : []), cutoff);
 }
 
 export function createRunnerProject(input: { workspaceId: string; runnerId: string; label: string; rootFingerprint: string }) {
@@ -69,8 +95,9 @@ export function createRunnerJob(input: { workspaceId: string; project: RunnerPro
   const timestamp = nowIso();
   const id = `job-${randomUUID()}`;
   const status = input.approvalRequired ? "awaiting_approval" : "queued";
-  run(`INSERT INTO runner_jobs(id, workspace_id, project_id, runner_id, task_id, agent_id, kind, status, request_json, requested_at, approved_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, input.workspaceId, input.project.id, input.project.runner_id, input.taskId ?? null, input.agentId ?? null, request.kind, status, JSON.stringify(request), timestamp, input.approvalRequired ? null : timestamp, timestamp);
+  const requestJson = JSON.stringify(request); const requestSha256 = sha256(requestJson);
+  run(`INSERT INTO runner_jobs(id, workspace_id, project_id, runner_id, task_id, agent_id, kind, status, request_json, approved_request_sha256, requested_at, approved_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, input.workspaceId, input.project.id, input.project.runner_id, input.taskId ?? null, input.agentId ?? null, request.kind, status, requestJson, input.approvalRequired ? null : requestSha256, timestamp, input.approvalRequired ? null : timestamp, timestamp);
   return one<RunnerJobRow>("SELECT * FROM runner_jobs WHERE id = ?", id)!;
 }
 
@@ -78,10 +105,16 @@ export function claimNextRunnerJob(runnerId: string) {
   const database = db();
   database.exec("BEGIN IMMEDIATE");
   try {
+    const timestamp = nowIso();
+    database.prepare("UPDATE runner_jobs SET status = 'failed', result_text = 'Runner lease expired before a signed receipt was received. Local changes may already exist; inspect the project before retrying.', completed_at = ?, lease_expires_at = NULL, updated_at = ? WHERE runner_id = ? AND status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?").run(timestamp, timestamp, runnerId, timestamp);
     const job = database.prepare("SELECT * FROM runner_jobs WHERE runner_id = ? AND status = 'queued' ORDER BY requested_at LIMIT 1").get(runnerId) as RunnerJobRow | undefined;
     if (!job) { database.exec("COMMIT"); return undefined; }
-    const timestamp = nowIso();
-    const updated = database.prepare("UPDATE runner_jobs SET status = 'running', started_at = ?, updated_at = ? WHERE id = ? AND status = 'queued'").run(timestamp, timestamp, job.id);
+    if (!job.approved_request_sha256 || job.approved_request_sha256 !== sha256(job.request_json)) {
+      database.prepare("UPDATE runner_jobs SET status = 'cancelled', result_text = 'Approved request digest no longer matches the queued job.', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'queued'").run(timestamp, timestamp, job.id);
+      database.exec("COMMIT"); return undefined;
+    }
+    const leaseExpiresAt = new Date(Date.now() + runnerLeaseSeconds() * 1_000).toISOString();
+    const updated = database.prepare("UPDATE runner_jobs SET status = 'running', started_at = ?, lease_expires_at = ?, attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND status = 'queued'").run(timestamp, leaseExpiresAt, timestamp, job.id);
     database.exec("COMMIT");
     return Number(updated.changes) === 1 ? one<RunnerJobRow>("SELECT * FROM runner_jobs WHERE id = ?", job.id) : undefined;
   } catch (error) { database.exec("ROLLBACK"); throw error; }

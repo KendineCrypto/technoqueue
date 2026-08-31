@@ -1,13 +1,16 @@
-import { runnerJobIdSchema, workspaceSchema } from "@technoqueue/core";
+import { runnerJobIdSchema, runnerJobRequestSchema, sha256, workspaceSchema } from "@technoqueue/core";
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { assertSameOrigin, authErrorResponse, AuthError, ownedWorkspace, requireUser } from "@/lib/auth";
 import { nowIso, one, run, writeAudit, type RunnerJobRow, type RunnerProjectRow } from "@/lib/db";
-import { listJobs, projectHasPermission, publicJob } from "@/lib/local-projects";
+import { highRiskJobRequest, listJobs, projectHasPermission, publicJob } from "@/lib/local-projects";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ workspace: string }> };
-const updateSchema = z.object({ jobId: runnerJobIdSchema, action: z.enum(["approve", "reject", "retry"]) }).strict();
+const updateSchema = z.discriminatedUnion("action", [
+  z.object({ jobId: runnerJobIdSchema, action: z.literal("approve"), requestSha256: z.string().regex(/^[a-f0-9]{64}$/), acknowledgeRisk: z.boolean().default(false) }).strict(),
+  z.object({ jobId: runnerJobIdSchema, action: z.enum(["reject", "retry"]) }).strict()
+]);
 
 export async function GET(_: Request, context: Context) {
   try { const user = await requireUser(); const workspace = await ownedWorkspace(workspaceSchema.parse((await context.params).workspace), user.id); return NextResponse.json({ jobs: listJobs(workspace.id).map(publicJob) }); }
@@ -26,14 +29,20 @@ export async function PATCH(request: Request, context: Context) {
       if (job.status !== "failed") throw new AuthError("Only failed jobs can be retried", 409);
       if (!projectHasPermission(project, required)) throw new AuthError(`Project grant does not include ${required} permission`, 403);
       const timestamp = nowIso();
-      run("UPDATE runner_jobs SET status = 'queued', result_text = NULL, result_sha256 = NULL, receipt_signature = NULL, started_at = NULL, completed_at = NULL, updated_at = ? WHERE id = ? AND status = 'failed'", timestamp, job.id);
+      run("UPDATE runner_jobs SET status = 'queued', result_text = NULL, result_sha256 = NULL, receipt_signature = NULL, started_at = NULL, completed_at = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'failed'", timestamp, job.id);
       writeAudit({ userId: user.id, workspaceId: workspace.id, action: "runner.job_retried", targetId: job.id, metadata: { kind: job.kind, taskId: job.task_id } });
       return NextResponse.json({ ok: true });
     }
     if (job.status !== "awaiting_approval") throw new AuthError("Local job is no longer waiting for approval", 409);
     if (input.action === "approve" && !projectHasPermission(project, required)) throw new AuthError(`Project grant does not include ${required} permission`, 403);
+    if (input.action === "approve") {
+      const currentSha256 = sha256(job.request_json);
+      if (input.requestSha256 !== currentSha256) throw new AuthError("This proposal changed since you opened it. Review it again.", 409);
+      const requestValue = runnerJobRequestSchema.parse(JSON.parse(job.request_json));
+      if (highRiskJobRequest(requestValue) && !input.acknowledgeRisk) throw new AuthError("This action runs project code or changes a high-risk project file. Explicit risk acknowledgement is required.", 400);
+    }
     const timestamp = nowIso(); const status = input.action === "approve" ? "queued" : "rejected";
-    run("UPDATE runner_jobs SET status = ?, approved_at = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'awaiting_approval'", status, input.action === "approve" ? timestamp : null, input.action === "reject" ? timestamp : null, timestamp, job.id);
+    run("UPDATE runner_jobs SET status = ?, approved_request_sha256 = ?, approved_at = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'awaiting_approval'", status, input.action === "approve" ? input.requestSha256 : null, input.action === "approve" ? timestamp : null, input.action === "reject" ? timestamp : null, timestamp, job.id);
     writeAudit({ userId: user.id, workspaceId: workspace.id, action: input.action === "approve" ? "runner.job_approved" : "runner.job_rejected", targetId: job.id, metadata: { kind: job.kind, taskId: job.task_id } });
     return NextResponse.json({ ok: true });
   } catch (error) { return authErrorResponse(error, "Unable to update local job"); }

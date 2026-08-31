@@ -1,6 +1,6 @@
 {
   "name": "technoqueue",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Agent work, coordinated through Technocore.",
   "license": "MIT",

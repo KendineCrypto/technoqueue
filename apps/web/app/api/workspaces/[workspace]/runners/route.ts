@@ -46,7 +46,8 @@ export async function DELETE(request: Request, context: Context) {
     const result = run("UPDATE local_runners SET revoked_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL", nowIso(), nowIso(), input.runnerId, workspace.id);
     if (Number(result.changes) !== 1) throw new AuthError("Runner not found", 404);
     run("UPDATE runner_projects SET revoked_at = ?, updated_at = ? WHERE runner_id = ? AND workspace_id = ? AND revoked_at IS NULL", nowIso(), nowIso(), input.runnerId, workspace.id);
-    run("UPDATE runner_jobs SET status = 'cancelled', updated_at = ? WHERE runner_id = ? AND workspace_id = ? AND status IN ('awaiting_approval','queued')", nowIso(), input.runnerId, workspace.id);
+    const timestamp = nowIso();
+    run("UPDATE runner_jobs SET status = 'cancelled', result_text = CASE WHEN status = 'running' THEN 'Runner revoked while the job was in flight. Local changes may already exist.' ELSE result_text END, completed_at = ?, lease_expires_at = NULL, updated_at = ? WHERE runner_id = ? AND workspace_id = ? AND status IN ('awaiting_approval','queued','running')", timestamp, timestamp, input.runnerId, workspace.id);
     writeAudit({ userId: user.id, workspaceId: workspace.id, action: "runner.revoked", targetId: input.runnerId });
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -26,7 +26,7 @@ export async function PATCH(request: Request, context: Context) {
     const timestamp = nowIso();
     if (input.action === "revoke") {
       run("UPDATE runner_projects SET revoked_at = ?, updated_at = ? WHERE id = ?", timestamp, timestamp, project.id);
-      run("UPDATE runner_jobs SET status = 'cancelled', updated_at = ? WHERE project_id = ? AND status IN ('awaiting_approval','queued')", timestamp, project.id);
+      run("UPDATE runner_jobs SET status = 'cancelled', result_text = CASE WHEN status = 'running' THEN 'Project revoked while the runner job was in flight. Local changes may already exist.' ELSE result_text END, completed_at = ?, lease_expires_at = NULL, updated_at = ? WHERE project_id = ? AND status IN ('awaiting_approval','queued','running')", timestamp, timestamp, project.id);
       writeAudit({ userId: user.id, workspaceId: workspace.id, action: "runner.project_revoked", targetId: project.id });
       return NextResponse.json({ ok: true });
     }

@@ -8,6 +8,7 @@ import {
   runnerHeartbeatPayload,
   runnerPairingPayload,
   runnerProjectRequestPayload,
+  runnerRelativePathSchema,
   sha256,
   signPayload
 } from "@technoqueue/core";
@@ -15,12 +16,13 @@ import { Command } from "commander";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { hostname, homedir, platform } from "node:os";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-const VERSION = "0.3.2";
+const VERSION = "0.3.3";
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const localProjectSchema = z.object({ path: z.string(), label: z.string(), rootFingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const runnerConfigSchema = z.object({
@@ -151,10 +153,24 @@ async function listProjectsCommand() {
   console.log();
 }
 
-const skippedNames = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".turbo", ".cache", ".env", ".env.local", ".env.production", "runner.json"]);
+const skippedNames = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".turbo", ".cache"]);
+const protectedExactNames = new Set(["runner.json", ".npmrc", ".netrc", ".pypirc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"]);
+const protectedExtensions = new Set([".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"]);
 const textExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".md", ".css", ".scss", ".html", ".yml", ".yaml", ".toml", ".py", ".rs", ".go", ".java", ".kt", ".swift", ".sql", ".txt"]);
 function allowedFile(name: string) { const lower = name.toLowerCase(); const dot = lower.lastIndexOf("."); return lower.startsWith("readme") || lower === "dockerfile" || lower === "package.json" || (dot >= 0 && textExtensions.has(lower.slice(dot))); }
-function secretLike(path: string) { return path.split(/[\\/]/).some((part) => part === ".git" || part.toLowerCase().startsWith(".env") || /(^|[-_.])(secret|credential|private[-_]?key)([-_.]|$)/i.test(part)); }
+function secretLike(path: string) {
+  return path.split(/[\\/]/).some((part) => {
+    const lower = part.toLowerCase(); const dot = lower.lastIndexOf(".");
+    return lower === ".git"
+      || lower.startsWith(".env")
+      || protectedExactNames.has(lower)
+      || lower.startsWith("id_rsa")
+      || lower.startsWith("id_ed25519")
+      || (dot >= 0 && protectedExtensions.has(lower.slice(dot)))
+      || /(^|[-_.])(secrets?|credentials?|private[-_]?keys?|service[-_]?accounts?)([-_.]|$)/i.test(lower);
+  });
+}
+function generatedPath(path: string) { return path.split(/[\\/]/).some((part) => skippedNames.has(part.toLowerCase())); }
 
 export async function collectContext(root: string, maxFiles: number, maxBytes: number) {
   const files: Array<{ path: string; content: string }> = []; let bytes = 0; let omitted = 0;
@@ -163,7 +179,7 @@ export async function collectContext(root: string, maxFiles: number, maxBytes: n
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       if (files.length >= maxFiles || bytes >= maxBytes) { omitted += 1; continue; }
-      if (skippedNames.has(entry.name) || entry.isSymbolicLink()) continue;
+      if (skippedNames.has(entry.name.toLowerCase()) || entry.isSymbolicLink()) continue;
       const absolute = resolve(directory, entry.name); const local = relative(root, absolute).replaceAll("\\", "/");
       if (secretLike(local)) continue;
       if (entry.isDirectory()) await walk(absolute);
@@ -180,7 +196,9 @@ export async function collectContext(root: string, maxFiles: number, maxBytes: n
 }
 
 async function assertWritablePath(root: string, localPath: string) {
+  runnerRelativePathSchema.parse(localPath);
   if (secretLike(localPath)) throw new Error(`Protected path rejected: ${localPath}`);
+  if (generatedPath(localPath)) throw new Error(`Generated or dependency path rejected: ${localPath}`);
   const rootReal = await realpath(root); const target = resolve(rootReal, localPath); const prefix = rootReal.endsWith(sep) ? rootReal : `${rootReal}${sep}`;
   if (!target.startsWith(prefix)) throw new Error(`Path escapes project: ${localPath}`);
   const parentReal = await realpath(dirname(target));
@@ -190,36 +208,66 @@ async function assertWritablePath(root: string, localPath: string) {
 }
 
 export async function applyChanges(root: string, changes: Array<{ path: string; content: string }>) {
-  if (new Set(changes.map((change) => change.path.toLowerCase())).size !== changes.length) throw new Error("Duplicate file paths are not allowed in one change set");
   const plans: Array<{ path: string; content: string; target: string; temporary: string; previous: string | null }> = [];
   for (const change of changes) {
     const target = await assertWritablePath(root, change.path); const temporary = `${target}.technoqueue-${randomUUID()}.tmp`;
     const previous = await readFile(target, "utf8").catch((error: unknown) => { if (error instanceof Error && "code" in error && error.code === "ENOENT") return null; throw error; });
     plans.push({ ...change, target, temporary, previous });
   }
+  const targetKeys = plans.map((plan) => platform() === "win32" ? plan.target.toLowerCase() : plan.target);
+  if (new Set(targetKeys).size !== targetKeys.length) throw new Error("Duplicate resolved file paths are not allowed in one change set");
   const applied: typeof plans = [];
+  const observed: Array<{ path: string; sha256: string }> = [];
   try {
     for (const plan of plans) await writeFile(plan.temporary, plan.content, { encoding: "utf8", flag: "wx" });
     for (const plan of plans) { await rename(plan.temporary, plan.target); applied.push(plan); }
+    for (const plan of plans) {
+      const content = await readFile(plan.target, "utf8");
+      if (content !== plan.content) throw new Error(`Observed file content did not match the approved proposal: ${plan.path}`);
+      observed.push({ path: plan.path, sha256: sha256(content) });
+    }
   } catch (error) {
-    for (const plan of applied.reverse()) { if (plan.previous === null) await unlink(plan.target).catch(() => undefined); else await writeFile(plan.target, plan.previous, "utf8").catch(() => undefined); }
+    const rollbackFailures: string[] = [];
+    for (const plan of [...applied].reverse()) {
+      try { if (plan.previous === null) await unlink(plan.target); else await writeFile(plan.target, plan.previous, "utf8"); }
+      catch { rollbackFailures.push(plan.path); }
+    }
     for (const plan of plans) await unlink(plan.temporary).catch(() => undefined);
-    throw error;
+    const cause = error instanceof Error ? error.message : "Unknown filesystem error";
+    const touched = applied.map((plan) => plan.path);
+    throw new Error(`File update failed: ${cause}. Files replaced before failure: ${touched.length ? touched.join(", ") : "none"}. ${rollbackFailures.length ? `ROLLBACK INCOMPLETE; inspect manually: ${rollbackFailures.join(", ")}.` : "Rollback completed for every replaced file."}`);
   }
-  return JSON.stringify({ changed: plans.map((plan) => ({ path: plan.path, sha256: sha256(plan.content) })) });
+  return JSON.stringify({ changed: observed });
 }
 
-async function runVerification(root: string, command: "pnpm-test" | "pnpm-typecheck" | "pnpm-lint" | "npm-test") {
-  const windows = platform() === "win32";
-  const commands = { "pnpm-test": [windows ? "pnpm.cmd" : "pnpm", ["test"]], "pnpm-typecheck": [windows ? "pnpm.cmd" : "pnpm", ["typecheck"]], "pnpm-lint": [windows ? "pnpm.cmd" : "pnpm", ["lint"]], "npm-test": [windows ? "npm.cmd" : "npm", ["test", "--"]] } as const;
-  const [binary, args] = commands[command];
-  return new Promise<string>((resolveRun, rejectRun) => {
-    const child = spawn(binary, [...args], { cwd: root, shell: false, windowsHide: true, env: { PATH: process.env.PATH, Path: process.env.Path, PATHEXT: process.env.PATHEXT, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP, CI: "1", NO_COLOR: "1" } });
+function safeRunnerError(error: unknown, root?: string) {
+  let message = error instanceof Error ? error.message : "Local job failed";
+  if (root) {
+    for (const variant of new Set([root, root.replaceAll("\\", "/"), root.replaceAll("/", "\\")])) message = message.replaceAll(variant, "<project>");
+  }
+  return message.slice(0, 4_000);
+}
+
+export type VerificationResult = { command: "pnpm-test" | "pnpm-typecheck" | "pnpm-lint" | "npm-test"; exitCode: number | null; output: string };
+
+export async function runVerification(root: string, command: VerificationResult["command"]) {
+  const require = createRequire(import.meta.url);
+  const pnpmCli = resolve(dirname(require.resolve("pnpm")), "bin", "pnpm.mjs");
+  const npmCli = resolve(dirname(require.resolve("npm/package.json")), "bin", "npm-cli.js");
+  const commands = {
+    "pnpm-test": [pnpmCli, ["test"]],
+    "pnpm-typecheck": [pnpmCli, ["typecheck"]],
+    "pnpm-lint": [pnpmCli, ["lint"]],
+    "npm-test": [npmCli, ["test", "--"]]
+  } as const;
+  const [cli, args] = commands[command];
+  return new Promise<VerificationResult>((resolveRun, rejectRun) => {
+    const child = spawn(process.execPath, [cli, ...args], { cwd: root, shell: false, windowsHide: true, env: { PATH: process.env.PATH, Path: process.env.Path, PATHEXT: process.env.PATHEXT, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP, CI: "1", NO_COLOR: "1" } });
     let output = ""; const append = (chunk: Buffer) => { if (output.length < 60_000) output += chunk.toString("utf8").slice(0, 60_000 - output.length); };
     child.stdout.on("data", append); child.stderr.on("data", append);
     const timer = setTimeout(() => { child.kill(); rejectRun(new Error("Verification timed out after 120 seconds")); }, 120_000);
     child.on("error", (error) => { clearTimeout(timer); rejectRun(error); });
-    child.on("exit", (code) => { clearTimeout(timer); resolveRun(JSON.stringify({ command, exitCode: code, output })); });
+    child.on("exit", (code) => { clearTimeout(timer); resolveRun({ command, exitCode: code, output }); });
   });
 }
 
@@ -233,8 +281,12 @@ async function processNextJob(config: RunnerConfig) {
     const request = runnerJobRequestSchema.parse(job.request);
     if (request.kind === "context") result = await collectContext(local.path, request.maxFiles, request.maxBytes);
     else if (request.kind === "apply_changes") result = await applyChanges(local.path, request.changes);
-    else result = await runVerification(local.path, request.command);
-  } catch (error) { status = "failed"; result = error instanceof Error ? error.message : "Local job failed"; }
+    else {
+      const verification = await runVerification(local.path, request.command);
+      result = JSON.stringify(verification);
+      if (verification.exitCode !== 0) status = "failed";
+    }
+  } catch (error) { status = "failed"; result = safeRunnerError(error, local?.path); }
   const completedAt = new Date().toISOString(); const resultSha256 = sha256(result); const identity = identityFromPrivateKeyPem(config.privateKeyPem);
   const payload = runnerJobResultPayload({ jobId: job.id, status, resultSha256, completedAt });
   await requestJson(`${config.site}/api/runners/${encodeURIComponent(config.runnerId)}/jobs/${encodeURIComponent(job.id)}/complete`, { method: "POST", headers: { authorization: `Bearer ${config.token}` }, body: JSON.stringify({ jobId: job.id, status, result, resultSha256, completedAt, signature: signPayload(identity, payload) }) });
