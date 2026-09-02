@@ -12,7 +12,7 @@
   "bugs": {
     "url": "https://github.com/KendineCrypto/technoqueue/issues"
   },
-  "packageManager": "pnpm@11.5.0",
+  "packageManager": "pnpm@11.25.0",
   "engines": { "node": ">=24" },
   "scripts": {
     "dev": "pnpm --filter @technoqueue/web dev",
