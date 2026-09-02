@@ -1,4 +1,4 @@
-import { analyzeIntegrity, createOfficeTaskInputSchema, createTaskInputSchema, serializeTask, workspaceSchema, type AgentProfile, type Task, type Workflow } from "@technoqueue/core";
+import { analyzeIntegrity, createOfficeTaskInputSchema, createTaskInputSchema, serializeTask, taskContractSha256, workspaceSchema, type AgentProfile, type Task, type Workflow } from "@technoqueue/core";
 import { NextResponse } from "next/server";
 import { assertSameOrigin, authErrorResponse, ownedWorkspace, requireUser } from "@/lib/auth";
 import { one, type RunnerProjectRow, type UserRow, writeAudit } from "@/lib/db";
@@ -58,8 +58,9 @@ export async function POST(request: Request, context: Context) {
     if (officeInput.success && (!trustedWorkflow || !taskMatchesTrustedRoute(task, trustedWorkflow, trustedAgents))) throw new IntegrityViolationError("Technocore changed the workflow while the task was being created. The new record was quarantined.", task.id);
     trustTechnocoreRecord(owned, task.id, "task", serializeTask(task));
     const owner = one<UserRow>("SELECT * FROM users WHERE id = ?", user.id);
-    if (owner) await queue.signedEvent(await decryptIdentity(owner.account_private_key_enc), { type: "task_created", task_id: task.id }).catch(() => undefined);
-    writeAudit({ userId: user.id, workspaceId: owned.id, action: "task.created", targetId: task.id, metadata: { title: task.title } });
+    const contractSha256 = taskContractSha256(task);
+    if (owner) await queue.signedEvent(await decryptIdentity(owner.account_private_key_enc), { type: "task_created", task_id: task.id, contract_sha256: contractSha256 }).catch(() => undefined);
+    writeAudit({ userId: user.id, workspaceId: owned.id, action: "task.created", targetId: task.id, metadata: { title: task.title, contractSha256 } });
     void runWorkspace(owned).then((result) => {
       if (result.action === "error" || result.action === "integrity_error") console.error("[runtime]", owned.slug, result);
     }).catch((error: unknown) => console.error("[runtime]", owned.slug, error));

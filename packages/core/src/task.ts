@@ -2,11 +2,36 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { sha256 } from "./hash";
 import { agentIdSchema, officeRoleSchema, workflowIdSchema, type AgentProfile, type Workflow } from "./office";
+import { defaultOutcomeContract, outcomeContractSchema, requestedOutcomeContractSchema } from "./outcomes";
 import { runnerProjectIdSchema } from "./runner";
 import { didSchema, taskIdSchema } from "./validation";
 
 export const roles = ["general", "planner", "researcher", "writer", "coder", "analyst"] as const;
 export const statuses = ["open", "running", "review", "done", "failed"] as const;
+
+export const paperRouteStates = ["ready", "working", "waiting", "retrying", "blocked", "exhausted"] as const;
+export const paperRouteSchema = z.object({
+  state: z.enum(paperRouteStates),
+  retry_count: z.number().int().min(0).max(8),
+  max_retries: z.number().int().min(1).max(8),
+  base_retry_seconds: z.number().int().min(5).max(300),
+  next_retry_at: z.string().datetime().nullable(),
+  reason: z.string().max(300).nullable(),
+  error_code: z.string().max(50).nullable(),
+  provider: z.string().max(30).nullable(),
+  used_fallback: z.boolean()
+}).strict();
+export const defaultPaperRoute = {
+  state: "ready" as const,
+  retry_count: 0,
+  max_retries: 4,
+  base_retry_seconds: 15,
+  next_retry_at: null,
+  reason: null,
+  error_code: null,
+  provider: null,
+  used_fallback: false
+};
 
 const nullableDid = didSchema.nullable();
 const nullableDate = z.string().datetime().nullable();
@@ -17,17 +42,41 @@ export const officeTaskStepSchema = z.object({
   role: officeRoleSchema,
   label: z.string().min(1).max(40),
   kind: z.enum(["work", "review"]),
-  status: z.enum(["pending", "running", "done", "changes_requested"]),
+  stage: z.number().int().min(0).max(4),
+  merge: z.boolean(),
+  requires_approval: z.boolean(),
+  max_revisions: z.number().int().min(0).max(5),
+  revision_count: z.number().int().min(0).max(6),
+  status: z.enum(["pending", "running", "awaiting_approval", "done", "changes_requested"]),
+  output: z.string().max(1200).nullable(),
   output_sha256: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   feedback: z.string().max(500).nullable()
 }).strict();
 
-export const officeTaskSchema = z.object({
+const officeTaskShape = z.object({
   workflow_id: workflowIdSchema,
   workflow_name: z.string().min(1).max(60),
   current_step: z.number().int().min(0).max(4),
-  steps: z.array(officeTaskStepSchema).min(1).max(5)
+  steps: z.array(officeTaskStepSchema).min(1).max(5),
+  rejection_target_step: z.number().int().min(0).max(4).nullable()
 }).strict();
+
+function normalizeOfficeTask(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const steps = Array.isArray(record.steps) ? record.steps.map((step, index) => step && typeof step === "object" && !Array.isArray(step) ? {
+    stage: index,
+    merge: false,
+    requires_approval: false,
+    max_revisions: 2,
+    revision_count: 0,
+    output: null,
+    ...(step as Record<string, unknown>)
+  } : step) : record.steps;
+  return { rejection_target_step: null, ...record, steps };
+}
+
+export const officeTaskSchema = z.preprocess(normalizeOfficeTask, officeTaskShape);
 
 export const taskSchema = z.object({
   v: z.literal(1),
@@ -51,6 +100,8 @@ export const taskSchema = z.object({
   reviewer_lease_until: nullableDate,
   review_decision: z.enum(["approved", "changes_requested"]).nullable(),
   review_feedback: z.string().max(1000).nullable(),
+  paper_route: paperRouteSchema.default(defaultPaperRoute),
+  outcome_contract: outcomeContractSchema.default(defaultOutcomeContract),
   previous_result: z.string().max(3500).nullable().optional(),
   project_id: runnerProjectIdSchema.nullable().optional(),
   office: officeTaskSchema.optional()
@@ -63,16 +114,20 @@ export const createOfficeTaskInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(2500),
   workflow_id: workflowIdSchema,
+  reliability: z.object({ max_retries: z.number().int().min(1).max(8).default(4), base_retry_seconds: z.number().int().min(5).max(300).default(15) }).strict().optional(),
+  outcome_contract: requestedOutcomeContractSchema.optional(),
   project_id: runnerProjectIdSchema.nullable().optional()
 });
 
-export type CreateOfficeTaskInput = z.infer<typeof createOfficeTaskInputSchema>;
+export type CreateOfficeTaskInput = z.input<typeof createOfficeTaskInputSchema>;
 
 export const createTaskInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(2500),
   role: z.enum(roles),
   requires_review: z.boolean(),
+  reliability: z.object({ max_retries: z.number().int().min(1).max(8).default(4), base_retry_seconds: z.number().int().min(5).max(300).default(15) }).strict().optional(),
+  outcome_contract: requestedOutcomeContractSchema.optional(),
   max_attempts: z.number().int().min(1).max(10).default(3)
 }).extend({ project_id: runnerProjectIdSchema.nullable().optional() });
 
@@ -81,10 +136,11 @@ export type CreateTaskInput = z.input<typeof createTaskInputSchema>;
 export function createTask(input: CreateTaskInput, now = new Date()): Task {
   const parsed = createTaskInputSchema.parse(input);
   const timestamp = now.toISOString();
+  const { reliability, ...taskInput } = parsed;
   return taskSchema.parse({
     v: 1,
     id: `task-${randomBytes(6).toString("hex")}`,
-    ...parsed,
+    ...taskInput,
     status: "open",
     created_at: timestamp,
     updated_at: timestamp,
@@ -98,7 +154,9 @@ export function createTask(input: CreateTaskInput, now = new Date()): Task {
     reviewer_claimed_at: null,
     reviewer_lease_until: null,
     review_decision: null,
-    review_feedback: null
+    review_feedback: null,
+    paper_route: { ...defaultPaperRoute, ...(reliability ?? {}) },
+    outcome_contract: parsed.outcome_contract ?? defaultOutcomeContract
   });
 }
 
@@ -110,12 +168,34 @@ export function createOfficeTask(input: CreateOfficeTaskInput, workflow: Workflo
     const agent = profiles.get(step.agent_id);
     if (!agent || agent.fired_at) throw new Error(`Employee ${step.agent_id} is no longer available`);
     if ((step.kind === "review") !== (agent.role === "reviewer")) throw new Error(`Employee ${step.agent_id} no longer matches this workflow step`);
-    return { agent_id: agent.id, agent_did: agent.did, name: agent.name, role: agent.role, label: step.label, kind: step.kind, status: "pending" as const, output_sha256: null, feedback: null };
+    return { agent_id: agent.id, agent_did: agent.did, name: agent.name, role: agent.role, label: step.label, kind: step.kind, stage: step.stage, merge: step.merge, requires_approval: step.requires_approval, max_revisions: step.max_revisions, revision_count: 0, status: "pending" as const, output: null, output_sha256: null, feedback: null };
   });
   const first = steps[0];
   if (!first || first.kind !== "work" || first.role === "reviewer") throw new Error("Workflow must begin with a working employee");
-  const task = createTask({ title: parsed.title, prompt: parsed.prompt, role: first.role, requires_review: steps.at(-1)?.kind === "review", max_attempts: 10, project_id: parsed.project_id ?? null }, now);
-  return taskSchema.parse({ ...task, office: { workflow_id: workflow.id, workflow_name: workflow.name, current_step: 0, steps } });
+  const task = createTask({ title: parsed.title, prompt: parsed.prompt, role: first.role, requires_review: steps.at(-1)?.kind === "review", max_attempts: 10, project_id: parsed.project_id ?? null, outcome_contract: parsed.outcome_contract, reliability: parsed.reliability }, now);
+  return taskSchema.parse({ ...task, office: { workflow_id: workflow.id, workflow_name: workflow.name, current_step: 0, steps, rejection_target_step: workflow.rejection_target_step } });
+}
+
+export function taskContractPayload(task: Task) {
+  return JSON.stringify({
+    v: 1,
+    id: task.id,
+    title: task.title,
+    prompt: task.prompt,
+    initial_role: task.office?.steps[0]?.role ?? task.role,
+    requires_review: task.requires_review,
+    project_id: task.project_id ?? null,
+    outcome_contract: task.outcome_contract,
+    office: task.office ? {
+      workflow_id: task.office.workflow_id,
+      workflow_name: task.office.workflow_name,
+      steps: task.office.steps.map((step) => ({ agent_id: step.agent_id, agent_did: step.agent_did, name: step.name, role: step.role, label: step.label, kind: step.kind }))
+    } : null
+  });
+}
+
+export function taskContractSha256(task: Task) {
+  return sha256(taskContractPayload(task));
 }
 
 export function parseTask(raw: string): Task {
@@ -124,6 +204,13 @@ export function parseTask(raw: string): Task {
 
 const TASK_STORAGE_TARGET = 8000;
 const TRUNCATION_MARKER = "\n[result truncated for Technocore]";
+const HANDOFF_TRUNCATION_MARKER = "\n[handoff compacted for Technocore]";
+
+function compactHandoff(output: string | null, maxLength: number) {
+  if (output === null || output.length <= maxLength) return output;
+  if (maxLength <= HANDOFF_TRUNCATION_MARKER.length) return HANDOFF_TRUNCATION_MARKER.slice(0, maxLength);
+  return `${output.slice(0, maxLength - HANDOFF_TRUNCATION_MARKER.length)}${HANDOFF_TRUNCATION_MARKER}`;
+}
 
 export function prepareTaskForStorage(task: Task): Task {
   const parsed = taskSchema.parse(task);
@@ -131,6 +218,13 @@ export function prepareTaskForStorage(task: Task): Task {
   delete withoutPreviousResult.previous_result;
   let compact = taskSchema.parse(withoutPreviousResult);
   if (JSON.stringify(compact).length <= TASK_STORAGE_TARGET) return compact;
+  if (compact.office) {
+    for (const maxLength of [700, 350]) {
+      const office = compact.office!;
+      compact = taskSchema.parse({ ...compact, office: { ...office, steps: office.steps.map((step) => ({ ...step, output: compactHandoff(step.output, maxLength) })) } });
+      if (JSON.stringify(compact).length <= TASK_STORAGE_TARGET) return compact;
+    }
+  }
   if (compact.result === null) throw new Error("Task metadata exceeds Technocore's note limit. Shorten the boss brief or workflow labels.");
 
   const originalResult = compact.result;

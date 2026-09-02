@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ProviderKind } from "./office";
+import { formatOutcomeContract } from "./outcomes";
 import { buildAgentSystemPrompt } from "./role-blueprints";
 import type { Task } from "./task";
 
@@ -33,7 +34,7 @@ export class OpenAIExecutor implements TaskExecutor, ReviewExecutor {
         role: task.role,
         instructions: ""
       }),
-      input: `${task.prompt}${task.review_feedback ? `\n\nReviewer feedback to address:\n${task.review_feedback}` : ""}`
+      input: `${task.prompt}\n\nLOCKED OUTCOME CONTRACT:\n${formatOutcomeContract(task.outcome_contract)}${task.review_feedback ? `\n\nReviewer feedback to address:\n${task.review_feedback}` : ""}`
     });
     return { provider: "openai", text: response.output_text };
   }
@@ -46,7 +47,7 @@ export class OpenAIExecutor implements TaskExecutor, ReviewExecutor {
         role: "reviewer",
         instructions: ""
       }),
-      input: `TASK:\n${task.prompt}\n\nCANDIDATE RESULT:\n${task.result ?? ""}`
+      input: `TASK:\n${task.prompt}\n\nLOCKED OUTCOME CONTRACT:\n${formatOutcomeContract(task.outcome_contract)}\n\nCANDIDATE RESULT:\n${task.result ?? ""}`
     });
     const text = response.output_text.trim();
     return text.startsWith("APPROVE") ? { approved: true } : { approved: false, feedback: text.replace(/^REQUEST_CHANGES:?\s*/i, "").slice(0, 1000) || "The result needs revision." };

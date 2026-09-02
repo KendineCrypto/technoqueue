@@ -1,10 +1,12 @@
 {
   "name": "@technoqueue/core",
-  "version": "0.3.3",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./capabilities": "./src/capabilities.ts",
+    "./outcomes": "./src/outcomes.ts",
     "./role-blueprints": "./src/role-blueprints.ts"
   },
   "scripts": {

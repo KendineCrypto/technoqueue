@@ -1,3 +1,4 @@
+export * from "./capabilities";
 export * from "./events";
 export * from "./executors";
 export * from "./hash";
@@ -5,6 +6,7 @@ export * from "./identity";
 export * from "./integrity";
 export * from "./office";
 export * from "./office-registry";
+export * from "./outcomes";
 export * from "./queue";
 export * from "./role-blueprints";
 export * from "./runner";

@@ -26,7 +26,8 @@ export async function GET(_: Request, context: Context) {
       agents: activeAgents.map(({ value }) => {
         const hosted = hostedMap.get(value.id);
         const connection = hosted ? providerMap.get(hosted.connection_id) : undefined;
-        return { ...value, sessionOwned: Boolean(hosted), configured: Boolean(connection), connectionLabel: connection?.label, connectionMaskedKey: connection ? publicProvider(connection).maskedKey : undefined, runningTaskId: hosted?.running_task_id ?? undefined, lastError: hosted?.last_error ?? undefined, usageLimit: agentUsageLimit(owned.id, value.id) };
+        const fallback = hosted?.fallback_connection_id ? providerMap.get(hosted.fallback_connection_id) : undefined;
+        return { ...value, sessionOwned: Boolean(hosted), configured: Boolean(connection), connectionId: connection?.id, connectionLabel: connection?.label, connectionMaskedKey: connection ? publicProvider(connection).maskedKey : undefined, fallbackConnectionId: fallback?.id, fallbackProvider: fallback?.provider, fallbackConnectionLabel: fallback?.label, fallbackConnectionMaskedKey: fallback ? publicProvider(fallback).maskedKey : undefined, fallbackModel: hosted?.fallback_model ?? undefined, retryAfter: hosted?.retry_after ?? undefined, runningTaskId: hosted?.running_task_id ?? undefined, lastError: hosted?.last_error ?? undefined, usageLimit: agentUsageLimit(owned.id, value.id) };
       }),
       workflows: workflows.map(({ value }) => value).filter((workflow) => workflow.steps.every((step) => activeAgentIds.has(step.agent_id))),
       providers: providerRows.map(publicProvider),

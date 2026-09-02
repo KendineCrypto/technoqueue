@@ -5,15 +5,21 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const eventBase = z.object({ task_id: taskIdSchema.optional(), label: z.string().max(80).optional() });
 export const agentEventSchema = z.discriminatedUnion("type", [
   eventBase.extend({ type: z.literal("agent_online"), role: z.enum(["general", "planner", "researcher", "writer", "coder", "analyst", "reviewer"]), version: z.literal("1") }),
-  eventBase.extend({ type: z.literal("task_created"), task_id: taskIdSchema }),
-  eventBase.extend({ type: z.literal("task_claimed"), task_id: taskIdSchema, prompt_sha256: hash, attempt: z.number().int().positive() }),
-  eventBase.extend({ type: z.literal("task_reclaimed"), task_id: taskIdSchema, prompt_sha256: hash, attempt: z.number().int().positive() }),
+  eventBase.extend({ type: z.literal("task_created"), task_id: taskIdSchema, contract_sha256: hash.optional() }),
+  eventBase.extend({ type: z.literal("task_claimed"), task_id: taskIdSchema, prompt_sha256: hash, contract_sha256: hash.optional(), attempt: z.number().int().positive() }),
+  eventBase.extend({ type: z.literal("task_reclaimed"), task_id: taskIdSchema, prompt_sha256: hash, contract_sha256: hash.optional(), attempt: z.number().int().positive() }),
   eventBase.extend({ type: z.literal("task_submitted"), task_id: taskIdSchema, result_sha256: hash, attempt: z.number().int().positive() }),
   eventBase.extend({ type: z.literal("review_claimed"), task_id: taskIdSchema, result_sha256: hash }),
   eventBase.extend({ type: z.literal("task_approved"), task_id: taskIdSchema, result_sha256: hash }),
   eventBase.extend({ type: z.literal("task_changes_requested"), task_id: taskIdSchema, result_sha256: hash, feedback: z.string().max(1000) }),
   eventBase.extend({ type: z.literal("task_failed"), task_id: taskIdSchema, reason: z.string().max(500) }),
-  eventBase.extend({ type: z.literal("office_step_started"), task_id: taskIdSchema, step: z.number().int().min(0).max(4), agent_id: z.string().max(32) }),
+  eventBase.extend({ type: z.literal("task_retry_scheduled"), task_id: taskIdSchema, retry: z.number().int().min(1).max(8), retry_at: z.string().datetime(), code: z.string().max(50) }),
+  eventBase.extend({ type: z.literal("task_blocked"), task_id: taskIdSchema, code: z.string().max(50), reason: z.string().max(300) }),
+  eventBase.extend({ type: z.literal("task_retry_exhausted"), task_id: taskIdSchema, retries: z.number().int().min(1).max(8), code: z.string().max(50), reason: z.string().max(300) }),
+  eventBase.extend({ type: z.literal("task_recovered"), task_id: taskIdSchema }),
+  eventBase.extend({ type: z.literal("checkpoint_approved"), task_id: taskIdSchema, step: z.number().int().min(0).max(4) }),
+  eventBase.extend({ type: z.literal("checkpoint_rejected"), task_id: taskIdSchema, step: z.number().int().min(0).max(4), feedback: z.string().max(500) }),
+  eventBase.extend({ type: z.literal("office_step_started"), task_id: taskIdSchema, step: z.number().int().min(0).max(4), agent_id: z.string().max(32), prompt_sha256: hash.optional(), contract_sha256: hash.optional() }),
   eventBase.extend({ type: z.literal("office_step_completed"), task_id: taskIdSchema, step: z.number().int().min(0).max(4), agent_id: z.string().max(32), result_sha256: hash })
 ]);
 

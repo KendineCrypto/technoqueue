@@ -1,4 +1,4 @@
-import { HostedProviderExecutor, TechnoQueue, buildAgentSystemPrompt, runnerJobRequestSchema, serializeTask, type AgentProfile, type Task } from "@technoqueue/core";
+import { HostedProviderExecutor, TechnoQueue, buildAgentSystemPrompt, formatOutcomeContract, runnerJobRequestSchema, serializeTask, type AgentProfile, type HostedExecutionInput, type HostedExecutionResult, type Task } from "@technoqueue/core";
 import { all, nowIso, one, run, type HostedAgentRow, type RunnerJobRow, type RunnerProjectRow, type WorkspaceRow, writeAudit } from "@/lib/db";
 import { createRunnerJob, projectHasPermission, purgeExpiredRunnerSnapshots } from "@/lib/local-projects";
 import { revealRunnerJobResult } from "@/lib/job-results";
@@ -15,16 +15,57 @@ globalThis.__technoQueueWorkspaceLocks = workspaceLocks;
 
 function workPrompt(task: Task) {
   const step = task.office?.steps[task.office.current_step];
-  const context = task.office && task.office.current_step > 0 && task.result ? `\n\nHANDOFF FROM THE PREVIOUS EMPLOYEE:\n${task.result}` : "";
+  const contextLabel = step?.merge ? "PARALLEL BRANCH OUTPUTS TO MERGE" : "HANDOFF FROM THE PREVIOUS EMPLOYEE";
+  const context = task.office && task.office.current_step > 0 && task.result ? `\n\n${contextLabel}:\n${task.result}` : "";
   const feedback = task.review_feedback ? `\n\nREVIEW FEEDBACK TO ADDRESS:\n${task.review_feedback}` : "";
-  return `TASK TITLE: ${task.title}\n\nBOSS BRIEF:\n${task.prompt}${context}${feedback}\n\nComplete only your assigned step: ${step?.label ?? "Complete the task"}.`;
+  return `TASK TITLE: ${task.title}\n\nBOSS BRIEF:\n${task.prompt}\n\nLOCKED OUTCOME CONTRACT:\n${formatOutcomeContract(task.outcome_contract)}${context}${feedback}\n\nComplete only your assigned step: ${step?.label ?? "Complete the task"}.${step?.merge ? " Reconcile every branch into one coherent handoff; identify conflicts instead of silently choosing one." : ""} Preserve the contract for every downstream handoff.`;
 }
 
 function reviewPrompt(task: Task) {
-  return `Review whether the candidate fulfills the boss brief and is a useful final result. Start your response with exactly APPROVE or REQUEST_CHANGES. If requesting changes, follow with concise, actionable feedback.\n\nBOSS BRIEF:\n${task.prompt}\n\nCANDIDATE RESULT:\n${task.result ?? ""}`;
+  return `Review the candidate against every item in the locked outcome contract. Do not approve a generally useful answer that misses a required deliverable or success criterion. Start your response with exactly APPROVE or REQUEST_CHANGES. If requesting changes, identify the unmet checklist items with concise, actionable feedback.\n\nBOSS BRIEF:\n${task.prompt}\n\nLOCKED OUTCOME CONTRACT:\n${formatOutcomeContract(task.outcome_contract)}\n\nCANDIDATE RESULT:\n${task.result ?? ""}`;
 }
 
 function leaseExpired(value: string | null) { return value !== null && new Date(value).getTime() < Date.now(); }
+
+type RoutedExecution = { execution: HostedExecutionResult; provider: ProviderConnection["provider"]; model: string; usedFallback: boolean };
+type ErrorDisposition = { code: string; retryable: boolean; fallbackAllowed: boolean };
+
+class PaperRouteExecutionError extends Error {
+  constructor(message: string, readonly disposition: ErrorDisposition, readonly provider: string, readonly usedFallback: boolean) { super(message); }
+}
+
+function executionErrorDisposition(error: unknown): ErrorDisposition {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (/usage limit|budget/.test(message)) return { code: "BUDGET_LIMIT", retryable: false, fallbackAllowed: false };
+  if (/\b(401|403)\b|invalid.*key|authentication|unauthorized/.test(message)) return { code: "AUTH", retryable: false, fallbackAllowed: true };
+  if (/\b429\b|quota|rate.?limit|high demand/.test(message)) return { code: "RATE_LIMIT", retryable: true, fallbackAllowed: true };
+  if (/timed out|timeout|abort/.test(message)) return { code: "TIMEOUT", retryable: true, fallbackAllowed: true };
+  if (/\b(500|502|503|504)\b|unavailable|network|fetch failed|econn/.test(message)) return { code: "UPSTREAM", retryable: true, fallbackAllowed: true };
+  if (/no (final )?text|empty output/.test(message)) return { code: "EMPTY_OUTPUT", retryable: true, fallbackAllowed: true };
+  return { code: "PROVIDER_ERROR", retryable: false, fallbackAllowed: true };
+}
+
+async function routedExecution(input: { profile: AgentProfile; primary: ProviderConnection; fallback?: ProviderConnection; fallbackModel?: string; request: HostedExecutionInput }): Promise<RoutedExecution> {
+  try {
+    const execution = await new HostedProviderExecutor(input.primary.provider, input.profile.model, input.primary.apiKey).generateWithUsage(input.request);
+    return { execution, provider: input.primary.provider, model: input.profile.model, usedFallback: false };
+  } catch (primaryError) {
+    const primaryDisposition = executionErrorDisposition(primaryError);
+    if (!input.fallback || !input.fallbackModel || !primaryDisposition.fallbackAllowed) {
+      throw new PaperRouteExecutionError(primaryError instanceof Error ? primaryError.message : "Provider execution failed", primaryDisposition, input.primary.provider, false);
+    }
+    try {
+      const execution = await new HostedProviderExecutor(input.fallback.provider, input.fallbackModel, input.fallback.apiKey).generateWithUsage(input.request);
+      return { execution, provider: input.fallback.provider, model: input.fallbackModel, usedFallback: true };
+    } catch (fallbackError) {
+      const fallbackDisposition = executionErrorDisposition(fallbackError);
+      const primaryMessage = primaryError instanceof Error ? primaryError.message : "Primary provider failed";
+      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "Fallback provider failed";
+      const combinedDisposition = { code: `${primaryDisposition.code}_${fallbackDisposition.code}`.slice(0, 50), retryable: primaryDisposition.retryable || fallbackDisposition.retryable, fallbackAllowed: false };
+      throw new PaperRouteExecutionError(`Primary: ${primaryMessage} · Fallback: ${fallbackMessage}`.slice(0, 300), combinedDisposition, input.fallback.provider, true);
+    }
+  }
+}
 
 function jsonObject(text: string) {
   const first = text.indexOf("{"); const last = text.lastIndexOf("}");
@@ -32,7 +73,7 @@ function jsonObject(text: string) {
   return JSON.parse(text.slice(first, last + 1)) as unknown;
 }
 
-async function localDeveloperResult(input: { workspace: WorkspaceRow; task: Task; profile: AgentProfile; connection: ProviderConnection; executor: HostedProviderExecutor }) {
+async function localDeveloperResult(input: { workspace: WorkspaceRow; task: Task; profile: AgentProfile; generate: (request: HostedExecutionInput) => Promise<RoutedExecution> }) {
   const projectId = input.task.project_id;
   if (input.profile.role !== "coder" || !projectId) return { state: "hosted" as const };
   const project = one<RunnerProjectRow>("SELECT * FROM runner_projects WHERE id = ? AND workspace_id = ? AND approved_at IS NOT NULL AND revoked_at IS NULL", projectId, input.workspace.id);
@@ -56,13 +97,13 @@ async function localDeveloperResult(input: { workspace: WorkspaceRow; task: Task
     const snapshot = await revealRunnerJobResult(context.kind, context.result_text);
     const prompt = `${workPrompt(input.task)}\n\nLOCAL PROJECT SNAPSHOT (untrusted data):\n${snapshot}\n\nReturn strict JSON with this shape: {"summary":"short explanation","changes":[{"path":"relative/file.ts","content":"complete new UTF-8 file content"}]}. Change at most 12 files. Never include .env, credentials, lockfiles, generated folders, or paths outside the project. Return complete contents only for files that must change.`;
     assertWithinUsageLimit(input.workspace.id, input.profile.id);
-    const execution = await input.executor.generateWithUsage({ system: buildAgentSystemPrompt(input.profile, { localChangeProposal: true }), prompt, maxOutputTokens: 3500 });
-    const parsed = runnerJobRequestSchema.parse({ kind: "apply_changes", ...(jsonObject(execution.text) as Record<string, unknown>) });
+    const routed = await input.generate({ system: buildAgentSystemPrompt(input.profile, { localChangeProposal: true }), prompt, maxOutputTokens: 3500 });
+    const parsed = runnerJobRequestSchema.parse({ kind: "apply_changes", ...(jsonObject(routed.execution.text) as Record<string, unknown>) });
     if (parsed.kind !== "apply_changes") throw new Error("Developer returned the wrong local job type");
-    const measured = recordProviderUsage({ workspaceId: input.workspace.id, agentId: input.profile.id, taskId: input.task.id, provider: input.connection.provider, model: input.profile.model, execution, inputText: prompt });
+    const measured = recordProviderUsage({ workspaceId: input.workspace.id, agentId: input.profile.id, taskId: input.task.id, provider: routed.provider, model: routed.model, execution: routed.execution, inputText: prompt });
     apply = createRunnerJob({ workspaceId: input.workspace.id, project, taskId: input.task.id, agentId: input.profile.id, request: parsed, approvalRequired: true });
     run("UPDATE runner_jobs SET result_text = NULL, updated_at = ? WHERE id = ? AND kind = 'context'", nowIso(), context.id);
-    writeAudit({ userId: input.workspace.owner_user_id, workspaceId: input.workspace.id, action: "runner.change_proposed", targetId: apply.id, metadata: { taskId: input.task.id, agentId: input.profile.id, files: parsed.changes.map((change) => change.path), usage: measured } });
+    writeAudit({ userId: input.workspace.owner_user_id, workspaceId: input.workspace.id, action: "runner.change_proposed", targetId: apply.id, metadata: { taskId: input.task.id, agentId: input.profile.id, files: parsed.changes.map((change) => change.path), usage: measured, fallback: routed.usedFallback } });
     return { state: "waiting" as const, reason: "A file change proposal is waiting for boss approval." };
   }
   if (apply.status === "rejected") return { state: "waiting" as const, reason: "The boss rejected the local change proposal." };
@@ -86,6 +127,24 @@ async function clockIn(queue: TechnoQueue, profile: AgentProfile, hosted: Hosted
   if (hosted.lastOnlineAt && Date.now() - hosted.lastOnlineAt < 90_000) return;
   await queue.signedEvent(hosted.identity, { type: "agent_online", role: profile.role, version: "1", label: profile.name });
   updateHostedAgent(hosted.agentId, { lastOnlineAt: Date.now() });
+}
+
+async function recordPaperRouteFailure(input: { queue: TechnoQueue; workspace: WorkspaceRow; stored: { raw: string; task: Task }; row: HostedAgentRow; identity: HostedAgent["identity"]; error: unknown }) {
+  const routeError = input.error instanceof PaperRouteExecutionError
+    ? input.error
+    : new PaperRouteExecutionError(input.error instanceof Error ? input.error.message : "Agent execution failed", executionErrorDisposition(input.error), "unknown", false);
+  const latest = await verifiedRecord(input.workspace, input.stored.task.id, "task", input.queue.client);
+  const deferred = await input.queue.deferOffice(
+    { raw: latest.raw, task: latest.value }, input.identity,
+    { reason: routeError.message, errorCode: routeError.disposition.code, provider: routeError.provider, retryable: routeError.disposition.retryable, usedFallback: routeError.usedFallback },
+    (persisted) => trustTechnocoreRecord(input.workspace, persisted.id, "task", serializeTask(persisted))
+  );
+  if (!deferred) return { action: "conflict", taskId: input.stored.task.id, agentId: input.row.agent_id, reason: "The paper route changed while its failure state was being recorded." } satisfies RuntimeResult;
+  const retryAfter = deferred.paper_route.next_retry_at ? new Date(deferred.paper_route.next_retry_at).getTime() : null;
+  updateHostedAgent(input.row.agent_id, { runningTaskId: null, lastError: routeError.message, retryAfter });
+  const action = deferred.paper_route.state === "retrying" ? "task.retry_scheduled" : deferred.paper_route.state === "exhausted" ? "task.retry_exhausted" : "task.blocked";
+  writeAudit({ userId: input.workspace.owner_user_id, workspaceId: input.workspace.id, action, targetId: deferred.id, metadata: { agentId: input.row.agent_id, code: routeError.disposition.code, retryCount: deferred.paper_route.retry_count, retryAt: deferred.paper_route.next_retry_at, provider: routeError.provider, fallbackTried: routeError.usedFallback, error: routeError.message } });
+  return { action: deferred.paper_route.state, taskId: deferred.id, agentId: input.row.agent_id, ...(deferred.office ? { step: deferred.office.current_step } : {}), ...(deferred.paper_route.reason ? { reason: deferred.paper_route.reason } : {}), ...(deferred.paper_route.state === "blocked" || deferred.paper_route.state === "exhausted" ? { error: deferred.paper_route.reason ?? "Paper route stopped" } : {}) } satisfies RuntimeResult;
 }
 
 export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResult> {
@@ -117,10 +176,14 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
       if (!hosted) continue;
       const connection = await providerConnection(row.connection_id, workspace.owner_user_id);
       if (!connection) { updateHostedAgent(row.agent_id, { lastError: "Provider connection missing" }); continue; }
+      const fallbackConnection = row.fallback_connection_id ? await providerConnection(row.fallback_connection_id, workspace.owner_user_id) : undefined;
       await clockIn(queue, profile, hosted).catch(() => undefined);
       const stored = storedTasks.find(({ task }) => {
         const step = task.office?.steps[task.office.current_step];
         if (!step || step.agent_id !== row.agent_id) return false;
+        if (step.status !== "pending" && step.status !== "changes_requested") return false;
+        if (task.paper_route.state === "blocked" || task.paper_route.state === "exhausted") return false;
+        if (task.paper_route.state === "retrying" && task.paper_route.next_retry_at && new Date(task.paper_route.next_retry_at).getTime() > Date.now()) return false;
         if (step.kind === "review") return task.status === "review" && (task.reviewer_did === null || leaseExpired(task.reviewer_lease_until) || (Boolean(row.last_error) && task.reviewer_did === hosted.identity.did));
         return task.status === "open" || (task.status === "running" && (leaseExpired(task.worker_lease_until) || (Boolean(row.last_error) && task.worker_did === hosted.identity.did)));
       });
@@ -128,29 +191,25 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
 
       const stepIndex = stored.task.office!.current_step;
       const step = stored.task.office!.steps[stepIndex]!;
-      const executor = new HostedProviderExecutor(connection.provider, profile.model, connection.apiKey);
+      const generate = (request: HostedExecutionInput) => routedExecution({ profile, primary: connection, ...(fallbackConnection && row.fallback_model ? { fallback: fallbackConnection, fallbackModel: row.fallback_model } : {}), request });
       let localResult: string | undefined;
       try {
-        const local = await localDeveloperResult({ workspace, task: stored.task, profile, connection, executor });
+        const local = await localDeveloperResult({ workspace, task: stored.task, profile, generate });
         if (local.state === "waiting") {
+          await queue.waitOffice(stored, local.reason, (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted)));
           updateHostedAgent(row.agent_id, { runningTaskId: stored.task.id, lastError: null, retryAfter: null });
           deferred ??= { action: "waiting_for_local_runner", taskId: stored.task.id, agentId: row.agent_id, step: stepIndex, reason: local.reason };
           continue;
         }
         if (local.state === "complete") localResult = local.result;
       } catch (error) {
-        const message = error instanceof Error ? error.message.slice(0, 300) : "Local developer preparation failed";
-        updateHostedAgent(row.agent_id, { runningTaskId: stored.task.id, lastError: message, retryAfter: Date.now() + 30_000 });
-        writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: "agent.error", targetId: row.agent_id, metadata: { taskId: stored.task.id, error: message } });
-        return { action: "error", taskId: stored.task.id, agentId: row.agent_id, error: message };
+        return recordPaperRouteFailure({ queue, workspace, stored, row, identity: hosted.identity, error });
       }
-      const resumeFailedClaim = Boolean(row.last_error) && (step.kind === "review" ? stored.task.reviewer_did === hosted.identity.did : stored.task.worker_did === hosted.identity.did);
-      const claimed = resumeFailedClaim ? stored.task : await queue.claimOffice(
-        stored,
-        hosted.identity,
-        Number(process.env.TECHNOQUEUE_LEASE_SECONDS ?? 120),
-        (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted))
-      );
+      const leaseSeconds = Number(process.env.TECHNOQUEUE_LEASE_SECONDS ?? 120);
+      const resumeFailedClaim = stored.task.paper_route.state === "retrying" && Boolean(row.last_error) && (step.kind === "review" ? stored.task.reviewer_did === hosted.identity.did : stored.task.worker_did === hosted.identity.did);
+      const claimed = resumeFailedClaim
+        ? await queue.resumeOffice(stored, hosted.identity, leaseSeconds, (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted)))
+        : await queue.claimOffice(stored, hosted.identity, leaseSeconds, (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted)));
       if (!claimed) {
         try { await verifiedRecord(workspace, stored.task.id, "task", queue.client); }
         catch (error) { if (error instanceof IntegrityViolationError) return { action: "integrity_error", taskId: stored.task.id, agentId: row.agent_id, error: error.message }; throw error; }
@@ -161,9 +220,9 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
         if (step.kind === "review") {
           const prompt = reviewPrompt(claimed);
           assertWithinUsageLimit(workspace.id, profile.id);
-          const execution = await executor.generateWithUsage({ system: buildAgentSystemPrompt(profile), prompt, maxOutputTokens: 800 });
-          const response = execution.text.trim();
-          const measured = recordProviderUsage({ workspaceId: workspace.id, agentId: profile.id, taskId: claimed.id, provider: connection.provider, model: profile.model, execution, inputText: prompt });
+          const routed = await generate({ system: buildAgentSystemPrompt(profile), prompt, maxOutputTokens: 800 });
+          const response = routed.execution.text.trim();
+          const measured = recordProviderUsage({ workspaceId: workspace.id, agentId: profile.id, taskId: claimed.id, provider: routed.provider, model: routed.model, execution: routed.execution, inputText: prompt });
           const approved = /^APPROVE\b/i.test(response);
           const feedback = response.replace(/^(APPROVE|REQUEST_CHANGES)\s*:?[-\s]*/i, "").slice(0, 500) || "The result needs revision.";
           const latest = await verifiedRecord(workspace, claimed.id, "task", queue.client);
@@ -174,17 +233,19 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
             (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted))
           );
           if (!finished) return { action: "conflict", taskId: claimed.id, agentId: row.agent_id, step: stepIndex, reason: "Review result lost an atomic update race; no success was recorded." };
-          writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: approved ? "task.approved" : "task.returned", targetId: claimed.id, metadata: { agentId: row.agent_id, step: stepIndex, usage: measured } });
+          writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: approved ? "task.approved" : "task.returned", targetId: claimed.id, metadata: { agentId: row.agent_id, step: stepIndex, usage: measured, provider: routed.provider, model: routed.model, fallback: routed.usedFallback } });
           return { action: approved ? "approved" : "returned", taskId: claimed.id, agentId: row.agent_id, step: stepIndex };
         }
         let result = localResult;
         let measured: { promptTokens: number; outputTokens: number; totalTokens: number } | undefined;
+        let routeMetadata: { provider: string; model: string; fallback: boolean } | undefined;
         if (!result) {
           const prompt = workPrompt(claimed);
           assertWithinUsageLimit(workspace.id, profile.id);
-          const execution = await executor.generateWithUsage({ system: buildAgentSystemPrompt(profile), prompt });
-          result = execution.text;
-          measured = recordProviderUsage({ workspaceId: workspace.id, agentId: profile.id, taskId: claimed.id, provider: connection.provider, model: profile.model, execution, inputText: prompt });
+          const routed = await generate({ system: buildAgentSystemPrompt(profile), prompt });
+          result = routed.execution.text;
+          measured = recordProviderUsage({ workspaceId: workspace.id, agentId: profile.id, taskId: claimed.id, provider: routed.provider, model: routed.model, execution: routed.execution, inputText: prompt });
+          routeMetadata = { provider: routed.provider, model: routed.model, fallback: routed.usedFallback };
         }
         const latest = await verifiedRecord(workspace, claimed.id, "task", queue.client);
         const completed = await queue.completeOffice(
@@ -194,14 +255,11 @@ export async function runWorkspace(workspace: WorkspaceRow): Promise<RuntimeResu
           (persisted) => trustTechnocoreRecord(workspace, persisted.id, "task", serializeTask(persisted))
         );
         if (!completed) return { action: "conflict", taskId: claimed.id, agentId: row.agent_id, step: stepIndex, reason: "Task result lost an atomic update race; no success was recorded." };
-        writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: "task.step_completed", targetId: claimed.id, metadata: { agentId: row.agent_id, step: stepIndex, ...(measured ? { usage: measured } : {}), localRunner: Boolean(localResult) } });
+        writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: "task.step_completed", targetId: claimed.id, metadata: { agentId: row.agent_id, step: stepIndex, ...(measured ? { usage: measured } : {}), ...(routeMetadata ?? {}), localRunner: Boolean(localResult) } });
         return { action: "completed_step", taskId: claimed.id, agentId: row.agent_id, step: stepIndex };
       } catch (error) {
         if (error instanceof IntegrityViolationError) return { action: "integrity_error", taskId: claimed.id, agentId: row.agent_id, error: error.message };
-        const message = error instanceof Error ? error.message.slice(0, 300) : "Agent execution failed";
-        updateHostedAgent(row.agent_id, { lastError: message, retryAfter: Date.now() + 30_000 });
-        writeAudit({ userId: workspace.owner_user_id, workspaceId: workspace.id, action: "agent.error", targetId: row.agent_id, metadata: { taskId: claimed.id, error: message } });
-        return { action: "error", taskId: claimed.id, agentId: row.agent_id, error: message };
+        return recordPaperRouteFailure({ queue, workspace, stored: { raw: serializeTask(claimed), task: claimed }, row, identity: hosted.identity, error });
       } finally { updateHostedAgent(row.agent_id, { runningTaskId: null }); }
     }
     return deferred ?? { action: "idle" };

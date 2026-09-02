@@ -16,6 +16,8 @@ export type HostedAgent = {
   workspaceId: string;
   identity: AgentIdentity;
   connectionId: string;
+  fallbackConnectionId?: string;
+  fallbackModel?: string;
   lastOnlineAt?: number;
   runningTaskId?: string;
   lastError?: string;
@@ -50,6 +52,8 @@ export async function hostedAgent(agentId: string, workspace: WorkspaceRow): Pro
     workspaceId: row.workspace_id,
     identity: await decryptIdentity(row.private_key_enc),
     connectionId: row.connection_id,
+    ...(row.fallback_connection_id === null ? {} : { fallbackConnectionId: row.fallback_connection_id }),
+    ...(row.fallback_model === null ? {} : { fallbackModel: row.fallback_model }),
     ...(row.last_online_at === null ? {} : { lastOnlineAt: row.last_online_at }),
     ...(row.running_task_id === null ? {} : { runningTaskId: row.running_task_id }),
     ...(row.last_error === null ? {} : { lastError: row.last_error }),
@@ -57,9 +61,9 @@ export async function hostedAgent(agentId: string, workspace: WorkspaceRow): Pro
   };
 }
 
-export function updateHostedAgent(agentId: string, changes: { connectionId?: string; lastOnlineAt?: number | null; runningTaskId?: string | null; lastError?: string | null; retryAfter?: number | null }) {
+export function updateHostedAgent(agentId: string, changes: { connectionId?: string; fallbackConnectionId?: string | null; fallbackModel?: string | null; lastOnlineAt?: number | null; runningTaskId?: string | null; lastError?: string | null; retryAfter?: number | null }) {
   const fields: string[] = []; const values: Array<string | number | null> = [];
-  const mapping = { connectionId: "connection_id", lastOnlineAt: "last_online_at", runningTaskId: "running_task_id", lastError: "last_error", retryAfter: "retry_after" } as const;
+  const mapping = { connectionId: "connection_id", fallbackConnectionId: "fallback_connection_id", fallbackModel: "fallback_model", lastOnlineAt: "last_online_at", runningTaskId: "running_task_id", lastError: "last_error", retryAfter: "retry_after" } as const;
   for (const key of Object.keys(changes) as Array<keyof typeof mapping>) {
     if (changes[key] === undefined) continue;
     fields.push(`${mapping[key]} = ?`); values.push(changes[key] ?? null);

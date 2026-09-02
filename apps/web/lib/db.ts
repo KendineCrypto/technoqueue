@@ -56,6 +56,8 @@ export type HostedAgentRow = {
   did: string;
   private_key_enc: string;
   connection_id: string;
+  fallback_connection_id: string | null;
+  fallback_model: string | null;
   last_online_at: number | null;
   running_task_id: string | null;
   last_error: string | null;
@@ -211,6 +213,8 @@ function openDatabase() {
       did TEXT NOT NULL UNIQUE,
       private_key_enc TEXT NOT NULL,
       connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE RESTRICT,
+      fallback_connection_id TEXT REFERENCES provider_connections(id) ON DELETE SET NULL,
+      fallback_model TEXT,
       last_online_at INTEGER,
       running_task_id TEXT,
       last_error TEXT,
@@ -288,7 +292,7 @@ function openDatabase() {
 }
 
 function migrate(database: DatabaseSync) {
-  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 9) return;
+  if ((globalThis.__technoQueueDbSchemaVersion ?? 0) >= 10) return;
   try { database.exec("ALTER TABLE workspaces ADD COLUMN event_room TEXT"); } catch { /* migrated already */ }
   try { database.exec("ALTER TABLE workspaces ADD COLUMN room_owned_at TEXT"); } catch { /* migrated already */ }
   database.exec("UPDATE workspaces SET event_room = 'd-tq-' || slug WHERE event_room IS NULL OR event_room = ''");
@@ -429,7 +433,10 @@ function migrate(database: DatabaseSync) {
   try { database.exec("ALTER TABLE runner_jobs ADD COLUMN lease_expires_at TEXT"); } catch { /* migrated already */ }
   try { database.exec("ALTER TABLE runner_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"); } catch { /* migrated already */ }
   database.exec("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (9, datetime('now'))");
-  globalThis.__technoQueueDbSchemaVersion = 9;
+  try { database.exec("ALTER TABLE hosted_agents ADD COLUMN fallback_connection_id TEXT REFERENCES provider_connections(id) ON DELETE SET NULL"); } catch { /* migrated already */ }
+  try { database.exec("ALTER TABLE hosted_agents ADD COLUMN fallback_model TEXT"); } catch { /* migrated already */ }
+  database.exec("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (10, datetime('now'))");
+  globalThis.__technoQueueDbSchemaVersion = 10;
 }
 
 export function db() {

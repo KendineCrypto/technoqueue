@@ -12,7 +12,11 @@ import { ensureWorkspaceIntegrity, trustTechnocoreRecord } from "@/lib/technocor
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ workspace: string }> };
-const inputSchema = createAgentProfileInputSchema.extend({ connectionId: z.string().min(1).max(40) }).strict();
+const inputSchema = createAgentProfileInputSchema.extend({
+  connectionId: z.string().min(1).max(40),
+  fallbackConnectionId: z.string().min(1).max(40).nullable().optional(),
+  fallbackModel: z.string().trim().min(1).max(100).nullable().optional()
+}).strict();
 
 export async function POST(request: Request, context: Context) {
   try {
@@ -27,13 +31,17 @@ export async function POST(request: Request, context: Context) {
     const connection = await providerConnection(input.connectionId, user.id);
     if (!connection) return NextResponse.json({ error: "Connect this provider before hiring the employee." }, { status: 400 });
     if (connection.provider !== input.provider) return NextResponse.json({ error: "Selected connection does not match the employee provider." }, { status: 400 });
+    if (input.fallbackConnectionId === input.connectionId) return NextResponse.json({ error: "Fallback connection must be different from the primary connection." }, { status: 400 });
+    const fallback = input.fallbackConnectionId ? await providerConnection(input.fallbackConnectionId, user.id) : undefined;
+    if (input.fallbackConnectionId && !fallback) return NextResponse.json({ error: "Fallback provider connection not found." }, { status: 400 });
+    if (fallback && !input.fallbackModel) return NextResponse.json({ error: "Choose a model for the fallback provider." }, { status: 400 });
     const identity = createIdentity();
     const registry = new OfficeRegistry(workspace);
-    const { connectionId, ...publicProfile } = input;
+    const { connectionId, fallbackConnectionId, fallbackModel, ...publicProfile } = input;
     const profile = await registry.createAgent(identity, publicProfile);
     trustTechnocoreRecord(owned, profile.id, "agent", JSON.stringify(profile));
     const timestamp = nowIso();
-    run("INSERT INTO hosted_agents(agent_id, workspace_id, owner_user_id, did, private_key_enc, connection_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", profile.id || randomUUID(), owned.id, user.id, identity.did, await encryptIdentity(identity), connectionId, timestamp, timestamp);
+    run("INSERT INTO hosted_agents(agent_id, workspace_id, owner_user_id, did, private_key_enc, connection_id, fallback_connection_id, fallback_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", profile.id || randomUUID(), owned.id, user.id, identity.did, await encryptIdentity(identity), connectionId, fallbackConnectionId ?? null, fallbackModel ?? null, timestamp, timestamp);
     await ensureOwnedEventRoom(owned, true).catch((error: unknown) => console.error("[employee-checkin]", workspace, "room sync failed", error));
     writeAudit({ userId: user.id, workspaceId: owned.id, action: "employee.hired", targetId: profile.id, metadata: { did: identity.did, provider: profile.provider, role: profile.role } });
     try { await queueForSlug(workspace).signedEvent(identity, { type: "agent_online", role: profile.role, version: "1", label: profile.name }); }

@@ -9,7 +9,13 @@ import { IntegrityViolationError, integrityErrorResponse, replaceTrustedRecord, 
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ workspace: string; agentId: string }> };
-const updateSchema = createAgentProfileInputSchema.partial().extend({ connectionId: z.string().min(1).max(40).optional(), paused: z.boolean().optional(), retryNow: z.boolean().optional() }).strict();
+const updateSchema = createAgentProfileInputSchema.partial().extend({
+  connectionId: z.string().min(1).max(40).optional(),
+  fallbackConnectionId: z.string().min(1).max(40).nullable().optional(),
+  fallbackModel: z.string().trim().min(1).max(100).nullable().optional(),
+  paused: z.boolean().optional(),
+  retryNow: z.boolean().optional()
+}).strict();
 
 export async function PATCH(request: Request, context: Context) {
   try {
@@ -21,6 +27,7 @@ export async function PATCH(request: Request, context: Context) {
     if (!hosted) return NextResponse.json({ error: "Employee not found in this office" }, { status: 404 });
     const trusted = await verifiedRecord(owned, agentId, "agent");
     const input = updateSchema.parse(await request.json());
+    if (input.fallbackConnectionId && input.fallbackConnectionId === (input.connectionId ?? hosted.connection_id)) return NextResponse.json({ error: "Fallback connection must be different from the primary connection" }, { status: 400 });
     if (input.retryNow) run("UPDATE hosted_agents SET retry_after = NULL, last_error = NULL, updated_at = ? WHERE agent_id = ?", nowIso(), agentId);
     if (input.model) run("UPDATE hosted_agents SET retry_after = NULL WHERE agent_id = ?", agentId);
     if (input.connectionId) {
@@ -29,8 +36,18 @@ export async function PATCH(request: Request, context: Context) {
       if (input.provider && input.provider !== connection.provider) return NextResponse.json({ error: "Provider and connection do not match" }, { status: 400 });
       run("UPDATE hosted_agents SET connection_id = ?, last_error = NULL, retry_after = NULL, updated_at = ? WHERE agent_id = ?", input.connectionId, nowIso(), agentId);
     }
+    if (input.fallbackConnectionId !== undefined) {
+      const fallback = input.fallbackConnectionId ? await providerConnection(input.fallbackConnectionId, user.id) : undefined;
+      if (input.fallbackConnectionId && !fallback) return NextResponse.json({ error: "Fallback provider connection not found" }, { status: 400 });
+      if (fallback && !input.fallbackModel) return NextResponse.json({ error: "Choose a fallback model" }, { status: 400 });
+      run("UPDATE hosted_agents SET fallback_connection_id = ?, fallback_model = ?, updated_at = ? WHERE agent_id = ?", input.fallbackConnectionId ?? null, input.fallbackConnectionId ? input.fallbackModel ?? null : null, nowIso(), agentId);
+    } else if (input.fallbackModel !== undefined && hosted.fallback_connection_id) {
+      run("UPDATE hosted_agents SET fallback_model = ?, updated_at = ? WHERE agent_id = ?", input.fallbackModel, nowIso(), agentId);
+    }
     const publicUpdate = { ...input };
     delete publicUpdate.connectionId;
+    delete publicUpdate.fallbackConnectionId;
+    delete publicUpdate.fallbackModel;
     delete publicUpdate.retryNow;
     const clean = Object.fromEntries(Object.entries(publicUpdate).filter(([, value]) => value !== undefined));
     const agent = agentProfileSchema.parse({ ...trusted.value, ...clean, id: trusted.value.id, did: trusted.value.did, workspace, updated_at: nowIso() });

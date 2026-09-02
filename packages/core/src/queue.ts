@@ -1,13 +1,13 @@
 import { encodeEvent, parseEvent, type AgentEvent, type ParsedEvent } from "./events";
 import { sha256 } from "./hash";
 import type { AgentIdentity } from "./identity";
-import { createTask, createOfficeTask, createOfficeTaskInputSchema, parseTask, prepareTaskForStorage, serializeTask, type CreateOfficeTaskInput, type CreateTaskInput, type Task } from "./task";
+import { createTask, createOfficeTask, createOfficeTaskInputSchema, parseTask, prepareTaskForStorage, serializeTask, taskContractSha256, type CreateOfficeTaskInput, type CreateTaskInput, type Task } from "./task";
 import type { AgentProfile, Workflow } from "./office";
 import { OfficeRegistry } from "./office-registry";
 import { TechnocoreClient } from "./technocore-client";
 import { TechnocoreConflictError, TechnocoreTimeoutError } from "./technocore-errors";
 import { resourcesForWorkspace } from "./validation";
-import { claimForReview, claimForWork, submitResult, approveTask, requestChanges, claimOfficeStep, completeOfficeWork, finishOfficeReview } from "./transitions";
+import { claimForReview, claimForWork, submitResult, approveTask, requestChanges, claimOfficeStep, completeOfficeWork, deferOfficeStep, finishOfficeReview, markOfficeWaiting, resumeOfficeStep } from "./transitions";
 
 export type StoredTask = { task: Task; raw: string };
 type PersistedTaskHook = (task: Task) => void | Promise<void>;
@@ -45,7 +45,7 @@ export class TechnoQueue {
         if (!found || found.raw !== expected) throw error;
       } else throw error;
     }
-    try { await this.client.sayUnsigned(this.resources.room, "dashboard", encodeEvent({ type: "task_created", task_id: task.id })); } catch { /* state creation succeeded; activity is best effort */ }
+    try { await this.client.sayUnsigned(this.resources.room, "dashboard", encodeEvent({ type: "task_created", task_id: task.id, contract_sha256: taskContractSha256(task) })); } catch { /* state creation succeeded; activity is best effort */ }
     return task;
   }
 
@@ -61,7 +61,7 @@ export class TechnoQueue {
     const task = createOfficeTask(input, workflow, agents);
     const officeTask = serializeTask(task);
     await this.client.setNoteIfAbsent(this.resources.namespace, task.id, officeTask);
-    try { await this.client.sayUnsigned(this.resources.room, "boss", encodeEvent({ type: "task_created", task_id: task.id })); } catch { /* task state is authoritative */ }
+    try { await this.client.sayUnsigned(this.resources.room, "boss", encodeEvent({ type: "task_created", task_id: task.id, contract_sha256: taskContractSha256(task) })); } catch { /* task state is authoritative */ }
     return parseTask(officeTask);
   }
 
@@ -86,7 +86,7 @@ export class TechnoQueue {
     const next = claimForWork(stored.task, identity.did, leaseSeconds);
     const won = await this.cas(stored, next);
     if (!won) return null;
-    await this.signedEvent(identity, { type: reclaimed ? "task_reclaimed" : "task_claimed", task_id: won.id, prompt_sha256: sha256(won.prompt), attempt: won.attempt });
+    await this.signedEvent(identity, { type: reclaimed ? "task_reclaimed" : "task_claimed", task_id: won.id, prompt_sha256: sha256(won.prompt), contract_sha256: taskContractSha256(won), attempt: won.attempt });
     return { task: won, reclaimed };
   }
 
@@ -97,7 +97,7 @@ export class TechnoQueue {
     const won = await this.cas(stored, next);
     if (!won) return null;
     await onPersisted?.(won);
-    await this.signedEvent(identity, { type: "office_step_started", task_id: won.id, step: stepIndex, agent_id: won.office!.steps[stepIndex]!.agent_id }).catch(() => undefined);
+    await this.signedEvent(identity, { type: "office_step_started", task_id: won.id, step: stepIndex, agent_id: won.office!.steps[stepIndex]!.agent_id, prompt_sha256: sha256(won.prompt), contract_sha256: taskContractSha256(won) }).catch(() => undefined);
     return won;
   }
 
@@ -117,7 +117,33 @@ export class TechnoQueue {
     const won = await this.cas(stored, next);
     if (won) await onPersisted?.(won);
     if (!won || !won.result_sha256) return won;
-    await this.signedEvent(identity, decision.approved ? { type: "task_approved", task_id: won.id, result_sha256: won.result_sha256 } : { type: "task_changes_requested", task_id: won.id, result_sha256: won.result_sha256, feedback: decision.feedback.slice(0, 1000) }).catch(() => undefined);
+    await this.signedEvent(identity, decision.approved
+      ? { type: "task_approved", task_id: won.id, result_sha256: won.result_sha256 }
+      : won.status === "failed"
+        ? { type: "task_failed", task_id: won.id, reason: won.paper_route.reason ?? "Workflow revision limit exhausted" }
+        : { type: "task_changes_requested", task_id: won.id, result_sha256: won.result_sha256, feedback: decision.feedback.slice(0, 1000) }).catch(() => undefined);
+    return won;
+  }
+
+  async deferOffice(stored: StoredTask, identity: AgentIdentity, input: { reason: string; errorCode: string; provider?: string; retryable: boolean; usedFallback?: boolean }, onPersisted?: PersistedTaskHook): Promise<Task | null> {
+    const won = await this.cas(stored, deferOfficeStep(stored.task, input));
+    if (won) await onPersisted?.(won);
+    if (won?.paper_route.state === "retrying" && won.paper_route.next_retry_at) await this.signedEvent(identity, { type: "task_retry_scheduled", task_id: won.id, retry: won.paper_route.retry_count, retry_at: won.paper_route.next_retry_at, code: won.paper_route.error_code ?? "UNKNOWN" }).catch(() => undefined);
+    if (won?.paper_route.state === "blocked") await this.signedEvent(identity, { type: "task_blocked", task_id: won.id, code: won.paper_route.error_code ?? "UNKNOWN", reason: won.paper_route.reason ?? "Paper route blocked" }).catch(() => undefined);
+    if (won?.paper_route.state === "exhausted") await this.signedEvent(identity, { type: "task_retry_exhausted", task_id: won.id, retries: won.paper_route.retry_count, code: won.paper_route.error_code ?? "UNKNOWN", reason: won.paper_route.reason ?? "Paper route exhausted" }).catch(() => undefined);
+    return won;
+  }
+
+  async waitOffice(stored: StoredTask, reason: string, onPersisted?: PersistedTaskHook): Promise<Task | null> {
+    if (stored.task.paper_route.state === "waiting" && stored.task.paper_route.reason === reason) return stored.task;
+    const won = await this.cas(stored, markOfficeWaiting(stored.task, reason));
+    if (won) await onPersisted?.(won);
+    return won;
+  }
+
+  async resumeOffice(stored: StoredTask, identity: AgentIdentity, leaseSeconds: number, onPersisted?: PersistedTaskHook): Promise<Task | null> {
+    const won = await this.cas(stored, resumeOfficeStep(stored.task, identity.did, leaseSeconds));
+    if (won) await onPersisted?.(won);
     return won;
   }
 

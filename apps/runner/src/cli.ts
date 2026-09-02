@@ -22,7 +22,7 @@ import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-const VERSION = "0.3.3";
+const VERSION = "0.4.3";
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const localProjectSchema = z.object({ path: z.string(), label: z.string(), rootFingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const runnerConfigSchema = z.object({

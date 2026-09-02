@@ -12,6 +12,45 @@ TechnoQueue is independent open-source software. It is not affiliated with FLOP 
 
 The project has a [DID-signed public contribution record](docs/technocore-contribution.md) in Technocore, linking the live product, source code, and the exact signed room sequence.
 
+## v0.4.3 workflow controls
+
+- A workflow can place up to three specialist desks in one logical parallel stage. Each branch receives the same prior handoff independently, then an explicit merge desk receives their labeled outputs.
+- Selected work steps can stop at a boss checkpoint. The owner reviews the handoff and either approves the paper route or returns it with revision feedback.
+- Every work step has its own zero-to-five revision allowance. Exhausting that allowance stops the task visibly instead of creating an infinite review loop.
+- Final reviewers can return rejected work to a configured earlier desk, including the merge desk, rather than always using the immediately preceding step.
+- Workflow topology and controls are stored in trusted Technocore records. Existing linear workflows and tasks are upgraded in memory with safe defaults and require no data migration.
+- The pixel-art workflow builder, task brief, and verified task file show parallel branches, merge desks, checkpoints, revision counters, and owner controls.
+
+Parallel branches are logically isolated but are currently executed one at a time by the hosted scheduler. This keeps provider spending and Technocore conditional writes deterministic while preserving independent branch context.
+
+## v0.4.2 reliable paper routes
+
+- Every task carries a Technocore-backed delivery state: `waiting`, `retrying`, `blocked`, or `exhausted`, with its retry count, next attempt, provider, and a compact reason.
+- The boss chooses one to eight route retries and the first delay when creating a task. Rate limits, timeouts, empty responses, and temporary upstream failures use exponential backoff capped at fifteen minutes.
+- Each hosted employee can privately use a second provider connection and model as a backup brain. Fallback credentials and configuration are never published in the employee profile.
+- Authentication and office-budget failures stop for a human decision instead of consuming requests indefinitely.
+- The task file exposes route diagnostics and lets the authenticated owner reset the interrupted step without changing its signed outcome contract.
+- Existing task records receive a backward-compatible default route policy when parsed.
+
+## v0.4.1 outcome contracts
+
+- Every new task records one to five explicit success criteria and one to four required deliverable kinds before the paper leaves the boss desk.
+- The immutable contract digest binds the title, brief, initial role, selected local project, full workflow route with employee DIDs, required deliverables, and success criteria.
+- The account DID signs that digest at task creation; each employee signs the same digest when starting a workflow step. The task proof view reports contract attestation separately from prompt, result, and approval attestations.
+- Work prompts carry the locked contract through every handoff. Reviewers are instructed to check every criterion and reject a generally useful response that omits a required deliverable.
+- The pixel boss desk includes a contract editor, while the owner-only task file shows the locked checklist, deliverables, digest, and attestation status.
+- Existing tasks remain readable with a legacy default contract and do not require a migration.
+
+## v0.4.0 specialist foundation
+
+- Every employee can now carry a structured specialty profile: a short specialist headline, a bounded description, and up to six canonical capabilities.
+- Specialty profiles are part of the DID-linked public employee record on Technocore, making them suitable for a future signed service manifest without publishing provider keys or account credentials.
+- The hosted runtime injects specialties beneath the immutable role blueprint. A specialty can focus a Researcher on crypto or a Developer on security, but cannot grant tools, switch roles, or create approval authority.
+- The pixel-art employee file and hiring desk include a dedicated specialty editor with canonical skills such as web research, software development, security review, writing, and translation.
+- Legacy employee records receive an empty specialty profile automatically when parsed; no database or manual migration is required.
+
+This release deliberately does **not** list employees publicly, accept external jobs, move value, or resell consumer AI subscriptions. Read the staged [product roadmap](docs/roadmap.md).
+
 ## v0.3.3 runner security and reliability
 
 - Rate limiting now uses the proxy-observed client address rather than the attacker-controlled first forwarding value, and its in-memory bucket store is bounded.

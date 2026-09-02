@@ -52,13 +52,18 @@ function auditedIds(workspaceId: string, action: string) {
 function validOfficeTask(task: Task, workflows: Map<string, Workflow>, agents: Map<string, AgentProfile>) {
   if (!task.office) return true;
   const workflow = workflows.get(task.office.workflow_id);
-  if (!workflow || workflow.name !== task.office.workflow_name || workflow.steps.length !== task.office.steps.length) return false;
+  if (!workflow || workflow.name !== task.office.workflow_name || workflow.steps.length !== task.office.steps.length || workflow.rejection_target_step !== task.office.rejection_target_step) return false;
   return task.office.steps.every((step, index) => {
     const routeStep = workflow.steps[index];
     const agent = agents.get(step.agent_id);
     return Boolean(routeStep && agent
       && routeStep.agent_id === step.agent_id
       && routeStep.kind === step.kind
+      && routeStep.label === step.label
+      && routeStep.stage === step.stage
+      && routeStep.merge === step.merge
+      && routeStep.requires_approval === step.requires_approval
+      && routeStep.max_revisions === step.max_revisions
       && agent.did === step.agent_did
       && agent.name === step.name
       && agent.role === step.role);
